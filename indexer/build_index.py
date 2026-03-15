@@ -16,113 +16,107 @@ Environment variables (see ../.env.example):
     CHUNK_OVERLAP                  (default: 64)
 """
 
-import argparse
 import os
-import tempfile
+import argparse
+import logging
 from pathlib import Path
 
-from azure.storage.blob import BlobServiceClient
-from dotenv import load_dotenv
-from langchain_community.document_loaders import PyPDFDirectoryLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
+# LangChain Imports
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    TextLoader,
+    UnstructuredMarkdownLoader,
+    UnstructuredXMLLoader
+)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 
-load_dotenv()
+# Configure Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-AZURE_STORAGE_CONNECTION_STRING = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-AZURE_STORAGE_CONTAINER_NAME = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "lasp-index")
-INDEX_BLOB_PREFIX = os.getenv("INDEX_BLOB_PREFIX", "faiss_index")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "64"))
+def load_documents(corpus_dir):
+    """Recursively load documents from the corpus directory based on file type."""
+    documents = []
+    corpus_path = Path(corpus_dir)
+    
+    if not corpus_path.exists():
+        logging.error(f"Corpus directory '{corpus_dir}' does not exist.")
+        return documents
 
+    # Define how to load specific extensions
+    loaders = {
+        '.pdf': PyPDFLoader,
+        '.txt': TextLoader,
+        '.md': UnstructuredMarkdownLoader,
+        '.xml': UnstructuredXMLLoader,
+        '.lbl': TextLoader # Treat NASA PDS label files as plain text
+    }
 
-def load_documents(pdf_dir: str):
-    """Load all PDFs from the given directory using langchain's PDF loader."""
-    print(f"Loading PDFs from: {pdf_dir}")
-    loader = PyPDFDirectoryLoader(pdf_dir)
-    documents = loader.load()
-    print(f"Loaded {len(documents)} page(s) from PDF files.")
+    logging.info(f"Scanning {corpus_dir} for documents...")
+    
+    for filepath in corpus_path.rglob('*'):
+        if filepath.is_file():
+            ext = filepath.suffix.lower()
+            if ext in loaders:
+                try:
+                    logging.info(f"Loading: {filepath.name}")
+                    loader_class = loaders[ext]
+                    # TextLoader requires explicit encoding to prevent crash on weird characters
+                    if loader_class == TextLoader:
+                        loader = loader_class(str(filepath), autodetect_encoding=True)
+                    else:
+                        loader = loader_class(str(filepath))
+                        
+                    documents.extend(loader.load())
+                except Exception as e:
+                    logging.warning(f"Failed to load {filepath.name}: {e}")
+            else:
+                logging.debug(f"Skipping unsupported file type: {filepath.name}")
+                
+    logging.info(f"Successfully loaded {len(documents)} document pages/sections.")
     return documents
 
+def build_index(corpus_dir, output_dir="lasp_faiss_index"):
+    # 1. Load Documents
+    docs = load_documents(corpus_dir)
+    if not docs:
+        logging.error("No documents loaded. Exiting.")
+        return
 
-def split_documents(documents):
-    """Split documents into overlapping chunks for embedding."""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
+    # 2. Split Documents into Chunks
+    # LASP docs are highly technical; larger overlap ensures context isn't lost between pages
+    logging.info("Splitting documents into chunks...")
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=750,
+        chunk_overlap=150,
+        length_function=len,
+        add_start_index=True,
     )
-    chunks = splitter.split_documents(documents)
-    print(f"Split into {len(chunks)} chunk(s).")
-    return chunks
+    chunks = text_splitter.split_documents(docs)
+    logging.info(f"Created {len(chunks)} text chunks.")
 
-
-def build_faiss_index(chunks, embedding_model: str) -> FAISS:
-    """Generate embeddings (GPU) and build a FAISS vector store."""
-    print(f"Generating embeddings with model '{embedding_model}' (device=cuda)...")
+    # 3. Initialize GPU Embeddings
+    # BGE-Small is heavily optimized for technical RAG and runs great on local CUDA
+    logging.info("Initializing HuggingFace Embeddings on CUDA...")
     embeddings = HuggingFaceEmbeddings(
-        model_name=embedding_model,
-        model_kwargs={"device": "cuda"},  # use local NVIDIA GPU
-        encode_kwargs={"batch_size": 64},
-    )
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-    print("FAISS index built.")
-    return vectorstore
-
-
-def upload_index_to_azure(
-    vectorstore: FAISS,
-    connection_string: str,
-    container_name: str,
-    prefix: str,
-) -> None:
-    """Save the FAISS index to a temp directory and upload both files to Azure Blob Storage."""
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        vectorstore.save_local(tmp_dir)
-
-        blob_service = BlobServiceClient.from_connection_string(connection_string)
-        container_client = blob_service.get_container_client(container_name)
-
-        try:
-            container_client.create_container()
-            print(f"Created blob container '{container_name}'.")
-        except Exception:
-            pass  # container already exists
-
-        for filename in ["index.faiss", "index.pkl"]:
-            local_path = Path(tmp_dir) / filename
-            blob_name = f"{prefix}/{filename}"
-            print(f"Uploading '{filename}' → blob '{blob_name}' ...")
-            with open(local_path, "rb") as fh:
-                container_client.upload_blob(name=blob_name, data=fh, overwrite=True)
-
-    print(
-        f"Index successfully uploaded to container '{container_name}' "
-        f"under prefix '{prefix}'."
+        model_name="BAAI/bge-small-en-v1.5",
+        model_kwargs={'device': 'cuda'},
+        encode_kwargs={'normalize_embeddings': True} # Better for cosine similarity
     )
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Build a FAISS index from LASP PDFs and upload to Azure Blob Storage."
-    )
-    parser.add_argument(
-        "pdf_dir",
-        help="Path to the directory containing LASP PDF files.",
-    )
-    args = parser.parse_args()
-
-    documents = load_documents(args.pdf_dir)
-    chunks = split_documents(documents)
-    vectorstore = build_faiss_index(chunks, EMBEDDING_MODEL)
-    upload_index_to_azure(
-        vectorstore,
-        AZURE_STORAGE_CONNECTION_STRING,
-        AZURE_STORAGE_CONTAINER_NAME,
-        INDEX_BLOB_PREFIX,
-    )
-
+    # 4. Build and Save FAISS Index
+    logging.info("Building FAISS vector index (this may take a few minutes on your GPU)...")
+    vector_db = FAISS.from_documents(chunks, embeddings)
+    
+    os.makedirs(output_dir, exist_ok=True)
+    vector_db.save_local(output_dir)
+    logging.info(f"SUCCESS: FAISS index saved locally to '{output_dir}/'")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Build a FAISS vector index from the LASP corpus.")
+    parser.add_argument("corpus_dir", help="Path to the directory containing scraped LASP data (e.g., lasp_corpus)")
+    parser.add_argument("--output", default="lasp_faiss_index", help="Output directory for the FAISS index files")
+    
+    args = parser.parse_args()
+    build_index(args.corpus_dir, args.output)
