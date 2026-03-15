@@ -1,13 +1,19 @@
 # Indexer dependencies — run locally on a machine with an NVIDIA GPU
 # Install with: pip install -r requirements.txt
 
+# Scraping Dependencies
+requests
+beautifulsoup4
+urllib3
+
 # PDF loading
 pypdf>=3.17,<5
 
 # LangChain ecosystem
-langchain>=0.2,<0.4
-langchain-community>=0.2,<0.4
-langchain-text-splitters>=0.2,<0.4
+langchain
+langchain-community
+langchain-huggingface
+langchain-text-splitters
 
 # Embeddings (sentence-transformers)
 sentence-transformers>=2.7,<4
@@ -15,10 +21,15 @@ sentence-transformers>=2.7,<4
 # FAISS with CUDA support (install the GPU wheel manually if needed)
 # For CUDA 12: pip install faiss-gpu-cu12
 # For CPU fallback: pip install faiss-cpu
-faiss-cpu>=1.8,<2
+faiss-gpu-cu12
 
 # Azure Blob Storage
 azure-storage-blob>=12.19,<13
 
 # Environment variable loading
 python-dotenv>=1.0,<2
+
+sentence-transformers
+pypdf
+unstructured
+markdown

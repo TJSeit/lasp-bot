@@ -1,3 +1,7 @@
+# LASP Corpus Builder
+# pip install -r requirements.txt
+# python build_corpus.py
+
 import os
 import time
 import logging
@@ -52,7 +56,7 @@ class LaspCorpusBuilder:
             f.write(content)
         logging.info(f"[{category.upper()}] Saved -> {filename}")
 
-    def scrape_web_and_pds(self, url, depth=0, max_depth=3):
+    def scrape_web_and_pds(self, url, depth=0, max_depth=4):
         """Pillars 1 & 2: Scrape Mission Portals and NASA Data Labels"""
         if depth > max_depth or url in self.visited_urls or not self.is_valid_domain(url):
             return
