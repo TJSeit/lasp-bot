@@ -42,6 +42,7 @@ class LaspCorpusBuilder:
         self.session = requests.Session()
         retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
+        self.session.mount("http://", HTTPAdapter(max_retries=retries))
         self.session.headers.update({'User-Agent': 'Mozilla/5.0 (LASP RAG Bot Builder)'})
 
     def _normalize_url(self, url):
@@ -133,13 +134,19 @@ class LaspCorpusBuilder:
         logging.info(f"[CRAWL] Depth {depth} | {normalized_url}")
         
         try:
-            response = self.session.get(normalized_url, timeout=15)
+            response = self.session.get(normalized_url, timeout=15, allow_redirects=True)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
             logging.warning(f"[ERROR] Failed to fetch {normalized_url}: {e}")
             return
 
         content_type = response.headers.get('Content-Type', '').lower()
+
+        # Catch "hidden" PDFs that were reached via a redirect or lacked a .pdf extension
+        if 'application/pdf' in content_type:
+            logging.info(f"[HIDDEN PDF FOUND] {normalized_url}")
+            self.download_binary(normalized_url, 'pdf')
+            return
 
         # Handle HTML -> Convert to clean text for the LLM
         if 'text/html' in content_type:
@@ -158,18 +165,28 @@ class LaspCorpusBuilder:
                 href = link.get('href')
                 full_url = self._normalize_url(urljoin(normalized_url, href).split('#')[0])
                 
-                # Check for target file types
-                lower_url = full_url.lower()
-                if lower_url.endswith('.pdf'):
+                # Check the exact PATH, ignoring query parameters
+                parsed_url = urlparse(full_url)
+                lower_path = parsed_url.path.lower()
+                
+                if lower_path.endswith('.pdf'):
                     self.download_binary(full_url, 'pdf')
-                elif lower_url.endswith(('.lbl', '.xml')):
+                elif lower_path.endswith(('.lbl', '.xml')):
                     self.download_binary(full_url, 'pds_data')
                 elif self.is_valid_domain(full_url) and full_url not in self.visited_urls:
                     time.sleep(0.5) # Politeness delay
                     self.scrape_web_and_pds(full_url, depth + 1, max_depth)
 
     def download_binary(self, url, category):
-        filename = os.path.basename(urlparse(url).path)
+        # Safely extract the filename, ignoring query parameters like ?v=1
+        parsed_path = urlparse(url).path
+        filename = os.path.basename(parsed_path)
+
+        # Fallback if the URL ends in a trailing slash or lacks a name
+        if not filename or not filename.endswith(('.pdf', '.xml', '.lbl')):
+            ext = 'pdf' if category == 'pdf' else 'xml'
+            filename = f"document_{int(time.time())}.{ext}"
+
         filepath = os.path.join(self.dirs[category], filename)
         
         if os.path.exists(filepath):
