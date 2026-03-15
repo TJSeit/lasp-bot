@@ -25,6 +25,12 @@ A retrieval-augmented generation (RAG) chatbot that answers questions about the
 │      ├─ Embed question (sentence-transformers, CPU)          │
 │      ├─ Retrieve top-K chunks from FAISS                     │
 │      └─ Call local Ollama server (llama3, mistral, etc.)     │
+│                                                              │
+│  app/discord_bot.py  Discord bot                             │
+│    !ask / !lasp <question>                                   │
+│      ├─ Embed question (sentence-transformers, CPU)          │
+│      ├─ Retrieve top-K chunks from FAISS                     │
+│      └─ Call local Ollama server (llama3, mistral, etc.)     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -67,6 +73,8 @@ cp .env.example .env
 | `TOP_K` | Chunks to retrieve per query (default: `5`) |
 | `CHUNK_SIZE` | Token chunk size for indexer (default: `512`) |
 | `CHUNK_OVERLAP` | Chunk overlap for indexer (default: `64`) |
+| `DISCORD_TOKEN` | Discord bot token — required for `discord_bot.py` |
+| `DISCORD_COMMAND_PREFIX` | Command prefix for Discord bot (default: `!`) |
 
 ### 3 — Build the FAISS index (local, GPU)
 
@@ -110,6 +118,32 @@ docker run -p 8000:8000 \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
   lasp-bot:latest
 ```
+
+### 6 — Run the Discord bot
+
+1. [Create a Discord application and bot](https://discord.com/developers/applications), then copy the bot token.
+2. Invite the bot to your server with the **Send Messages** and **Read Message History** permissions (and the `MESSAGE_CONTENT` privileged intent enabled in the Developer Portal).
+3. Add `DISCORD_TOKEN` to your `.env` file:
+
+```bash
+DISCORD_TOKEN=your_discord_bot_token_here
+```
+
+4. Start the bot:
+
+```bash
+cd app
+python discord_bot.py
+```
+
+Once online, use `!ask` (or `!lasp`) in any channel the bot can see:
+
+```
+!ask What missions does LASP operate?
+!lasp What is the MAVEN mission?
+```
+
+The bot will reply with an **Answer** and up to three **Sources** from the LASP documentation corpus.
 
 ---
 
@@ -160,10 +194,12 @@ lasp-bot/
 ├── app/
 │   ├── main.py          # FastAPI application
 │   ├── rag.py           # RAG pipeline (local FAISS + Ollama)
+│   ├── discord_bot.py   # Discord bot (!ask / !lasp commands)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── tests/
-│       └── test_rag.py
+│       ├── test_rag.py
+│       └── test_discord_bot.py
 ├── .env.example
 └── README.md
 ```
