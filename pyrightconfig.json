@@ -1,0 +1,8 @@
+{
+  "include": [
+    "app",
+    "indexer"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingModuleSource": "none"
+}

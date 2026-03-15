@@ -26,7 +26,6 @@ load_dotenv()
 from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
-    UnstructuredMarkdownLoader,
     UnstructuredXMLLoader
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -73,7 +72,7 @@ def load_documents(corpus_dir):
     loaders = {
         '.pdf': PyPDFLoader,
         '.txt': TextLoader,
-        '.md': UnstructuredMarkdownLoader,
+        '.md': TextLoader,
         '.xml': UnstructuredXMLLoader,
         '.lbl': TextLoader # Treat NASA PDS label files as plain text
     }

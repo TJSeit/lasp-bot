@@ -4,7 +4,7 @@
 # Scraping Dependencies
 requests
 beautifulsoup4
-urllib3
+urllib3>=2.6.3
 
 # PDF loading
 pypdf>=3.17,<5
@@ -27,7 +27,10 @@ faiss-cpu; platform_system != "Linux"
 # Environment variable loading
 python-dotenv>=1.0,<2
 
-sentence-transformers
-pypdf
+# Document parsing
 unstructured
 markdown
+
+# Type stubs (resolve Pylance/Pyright import warnings in VS Code)
+types-requests>=2.31,<3
+types-beautifulsoup4>=4.12,<5
