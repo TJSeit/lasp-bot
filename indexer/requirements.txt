@@ -24,9 +24,6 @@ sentence-transformers>=2.7,<4
 faiss-gpu-cu12; platform_system == "Linux"
 faiss-cpu; platform_system != "Linux"
 
-# Azure Blob Storage
-azure-storage-blob>=12.19,<13
-
 # Environment variable loading
 python-dotenv>=1.0,<2
 

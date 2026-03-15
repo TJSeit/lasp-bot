@@ -6,7 +6,7 @@ Endpoints:
     GET  /health    — health check (JSON)
     POST /query     — accept a question, return answer + source citations
 
-The RAG chain (FAISS retriever + Azure AI Foundry LLM client) is initialised
+The RAG chain (FAISS retriever + Ollama LLM client) is initialised
 once on startup via a lifespan context manager so it is shared across requests.
 """
 
@@ -23,7 +23,7 @@ _state: dict = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Download FAISS index from Azure Blob Storage and initialise the RAG chain."""
+    """Load the FAISS index from local storage and initialise the RAG chain."""
     retriever, llm_client = build_rag_chain()
     _state["retriever"] = retriever
     _state["llm_client"] = llm_client
@@ -34,9 +34,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LASP Bot",
     description=(
-        "A cost-optimized RAG application that answers questions about the "
-        "Laboratory for Atmospheric and Space Physics (LASP) using a FAISS "
-        "vector index and the Azure AI Foundry Serverless API."
+        "A RAG application that answers questions about the "
+        "Laboratory for Atmospheric and Space Physics (LASP) using a local FAISS "
+        "vector index and a locally-hosted Ollama LLM."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -75,8 +75,8 @@ async def health():
 async def query(request: QueryRequest):
     """
     Submit a natural-language question.  The service retrieves relevant chunks
-    from the FAISS index and generates an answer using the Azure AI Foundry
-    Serverless API (Llama 3 / GPT-4o-mini).
+    from the FAISS index and generates an answer using the locally-hosted
+    Ollama LLM.
     """
     if "retriever" not in _state:
         raise HTTPException(status_code=503, detail="RAG chain not yet initialised.")

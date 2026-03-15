@@ -1,8 +1,8 @@
 """
 Tests for the LASP bot RAG pipeline and FastAPI endpoints.
 
-All external I/O (Azure Blob Storage, Azure AI Foundry, FAISS) is mocked so
-the tests run without any cloud credentials or GPU.
+All external I/O (FAISS, Ollama) is mocked so the tests run without any
+running services or GPU.
 """
 
 import sys
@@ -27,11 +27,9 @@ def _make_fake_doc(content: str, source: str = "lasp_doc.pdf", page: int = 1, so
 
 
 def _make_fake_llm_response(text: str):
-    """Return a minimal azure-ai-inference response-like object."""
-    choice = MagicMock()
-    choice.message.content = text
+    """Return a minimal ollama chat response-like object."""
     response = MagicMock()
-    response.choices = [choice]
+    response.message.content = text
     return response
 
 
@@ -40,26 +38,22 @@ def _make_fake_llm_response(text: str):
 # ---------------------------------------------------------------------------
 
 
-class TestDownloadFaissIndex:
-    """_download_faiss_index downloads two blobs and writes them to disk."""
+class TestBuildRagChain:
+    """build_rag_chain loads the FAISS index from a local directory."""
 
-    def test_downloads_both_files(self, tmp_path):
-        mock_blob_service = MagicMock()
-        mock_container = MagicMock()
-        mock_blob_service.get_container_client.return_value = mock_container
-        mock_container.download_blob.return_value.readall.return_value = b"data"
+    def test_loads_vectorstore_from_local_dir(self):
+        mock_vectorstore = MagicMock()
+        mock_retriever = MagicMock()
+        mock_vectorstore.as_retriever.return_value = mock_retriever
 
-        with patch("rag.BlobServiceClient") as MockBS:
-            MockBS.from_connection_string.return_value = mock_blob_service
-            rag._download_faiss_index("conn", "container", "prefix", str(tmp_path))
+        with patch("rag._load_vectorstore", return_value=mock_vectorstore) as mock_load, \
+             patch("rag.ollama.Client") as MockClient:
+            retriever, llm_client = rag.build_rag_chain()
 
-        assert mock_container.download_blob.call_count == 2
-        called_blobs = {
-            call.args[0] for call in mock_container.download_blob.call_args_list
-        }
-        assert called_blobs == {"prefix/index.faiss", "prefix/index.pkl"}
-        assert (tmp_path / "index.faiss").read_bytes() == b"data"
-        assert (tmp_path / "index.pkl").read_bytes() == b"data"
+        mock_load.assert_called_once_with(rag.FAISS_INDEX_DIR, rag.EMBEDDING_MODEL)
+        mock_vectorstore.as_retriever.assert_called_once_with(search_kwargs={"k": rag.TOP_K})
+        MockClient.assert_called_once_with(host=rag.OLLAMA_BASE_URL)
+        assert retriever is mock_retriever
 
 
 class TestAnswerQuery:
@@ -84,7 +78,7 @@ class TestAnswerQuery:
         retriever.invoke.return_value = docs
 
         llm_client = MagicMock()
-        llm_client.complete.return_value = _make_fake_llm_response(
+        llm_client.chat.return_value = _make_fake_llm_response(
             "LASP studies space weather and solar wind."
         )
 
@@ -103,14 +97,14 @@ class TestAnswerQuery:
         retriever.invoke.return_value = docs
 
         llm_client = MagicMock()
-        llm_client.complete.return_value = _make_fake_llm_response("Answer.")
+        llm_client.chat.return_value = _make_fake_llm_response("Answer.")
 
         rag.answer_query(retriever, llm_client, "My question?")
 
-        call_kwargs = llm_client.complete.call_args
+        call_kwargs = llm_client.chat.call_args
         messages = call_kwargs.kwargs["messages"]
         # The user message should contain both context and the question
-        user_msg_content = messages[-1].content
+        user_msg_content = messages[-1]["content"]
         assert "Important context." in user_msg_content
         assert "My question?" in user_msg_content
 
@@ -122,7 +116,7 @@ class TestAnswerQuery:
         retriever.invoke.return_value = [doc]
 
         llm_client = MagicMock()
-        llm_client.complete.return_value = _make_fake_llm_response("OK.")
+        llm_client.chat.return_value = _make_fake_llm_response("OK.")
 
         result = rag.answer_query(retriever, llm_client, "q?")
         assert result["sources"][0]["source"] == ""
@@ -157,7 +151,7 @@ def app_client():
         _make_fake_doc("LASP is located in Boulder, CO.", source="about.pdf", page=1)
     ]
     fake_llm = MagicMock()
-    fake_llm.complete.return_value = _make_fake_llm_response(
+    fake_llm.chat.return_value = _make_fake_llm_response(
         "LASP is located in Boulder, Colorado."
     )
 
@@ -208,7 +202,7 @@ class TestQueryEndpoint:
         fake_retriever = MagicMock()
         fake_retriever.invoke.return_value = [_make_fake_doc("ctx")]
         fake_llm = MagicMock()
-        fake_llm.complete.side_effect = RuntimeError("LLM unavailable")
+        fake_llm.chat.side_effect = RuntimeError("LLM unavailable")
 
         with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)):
             import main as app_module

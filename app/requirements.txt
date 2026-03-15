@@ -12,12 +12,11 @@ langchain-community>=0.2,<0.4
 # Embeddings (sentence-transformers, CPU inference in the container)
 sentence-transformers>=2.7,<4
 
-# FAISS — CPU build (no GPU required in Azure Container Apps)
+# FAISS — CPU build (no GPU required)
 faiss-cpu>=1.8,<2
 
-# Azure SDKs
-azure-storage-blob>=12.19,<13
-azure-ai-inference>=1.0,<2
+# Ollama client
+ollama>=0.4,<1
 
 # Environment variable loading
 python-dotenv>=1.0,<2

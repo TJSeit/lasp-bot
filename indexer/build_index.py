@@ -1,19 +1,16 @@
 """
 build_index.py — Build a FAISS vector index from a directory of LASP PDFs and
-upload it to Azure Blob Storage.
+save it to a local directory.
 
-Run this script locally (NVIDIA GPU recommended) before deploying the FastAPI app.
+Run this script locally (NVIDIA GPU recommended) before running the FastAPI app.
 
 Usage:
     python build_index.py /path/to/lasp/pdfs
 
 Environment variables (see ../.env.example):
-    AZURE_STORAGE_CONNECTION_STRING
-    AZURE_STORAGE_CONTAINER_NAME   (default: lasp-index)
-    INDEX_BLOB_PREFIX              (default: faiss_index)
-    EMBEDDING_MODEL                (default: all-MiniLM-L6-v2)
-    CHUNK_SIZE                     (default: 512)
-    CHUNK_OVERLAP                  (default: 64)
+    EMBEDDING_MODEL   (default: all-MiniLM-L6-v2)
+    CHUNK_SIZE        (default: 512)
+    CHUNK_OVERLAP     (default: 64)
 """
 
 import os
@@ -24,9 +21,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
-
-# Azure Blob Storage
-from azure.storage.blob import BlobServiceClient
 
 # LangChain Imports
 from langchain_community.document_loaders import (
@@ -45,9 +39,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "64"))
-AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
-AZURE_STORAGE_CONTAINER_NAME = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "lasp-index")
-INDEX_BLOB_PREFIX = os.getenv("INDEX_BLOB_PREFIX", "faiss_index")
 
 
 def _load_source_manifest(corpus_path: Path) -> dict[str, str]:
@@ -152,28 +143,6 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
     vector_db.save_local(output_dir)
     logging.info(f"SUCCESS: FAISS index saved locally to '{output_dir}/'")
 
-    # 5. Upload Index to Azure Blob Storage
-    if AZURE_STORAGE_CONNECTION_STRING:
-        logging.info(f"Uploading FAISS index to Azure Blob Storage ({AZURE_STORAGE_CONTAINER_NAME}/{INDEX_BLOB_PREFIX}/)...")
-        try:
-            blob_service = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-            container_client = blob_service.get_container_client(AZURE_STORAGE_CONTAINER_NAME)
-            for filename in ["index.faiss", "index.pkl"]:
-                local_path = Path(output_dir) / filename
-                blob_name = f"{INDEX_BLOB_PREFIX}/{filename}"
-                with open(local_path, "rb") as data:
-                    container_client.upload_blob(blob_name, data, overwrite=True)
-                logging.info(f"Uploaded {filename} -> {blob_name}")
-            logging.info("SUCCESS: FAISS index uploaded to Azure Blob Storage.")
-        except Exception as e:
-            logging.error(f"Failed to upload FAISS index to Azure Blob Storage: {e}")
-            raise
-    else:
-        logging.warning(
-            "AZURE_STORAGE_CONNECTION_STRING is not set. "
-            "Skipping Azure Blob Storage upload. "
-            "Set this variable to deploy the index for the FastAPI app."
-        )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build a FAISS vector index from the LASP corpus.")

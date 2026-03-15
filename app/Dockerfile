@@ -17,6 +17,5 @@ COPY main.py rag.py ./
 
 EXPOSE 8000
 
-# Azure Container Apps routes traffic to port 8000 by default.
-# One Uvicorn worker is sufficient for serverless; scale via replicas.
+# One Uvicorn worker is sufficient for local hosting; scale via replicas as needed.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
