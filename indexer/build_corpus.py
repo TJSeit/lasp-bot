@@ -108,6 +108,10 @@ class LaspCorpusBuilder:
     def is_valid_domain(self, url):
         return 'lasp.colorado.edu' in urlparse(url).netloc
 
+    def is_excluded_url(self, url):
+        """Exclude sections we do not want in the corpus."""
+        return urlparse(url).path.startswith('/people/')
+
     def save_file(self, content, filename, category, is_binary=False, source_url=None):
         filepath = os.path.join(self.dirs[category], filename)
         if os.path.exists(filepath):
@@ -126,7 +130,12 @@ class LaspCorpusBuilder:
     def scrape_web_and_pds(self, url, depth=0, max_depth=4):
         """Pillars 1 & 2: Scrape Mission Portals and NASA Data Labels"""
         normalized_url = self._normalize_url(url)
-        if depth > max_depth or normalized_url in self.visited_urls or not self.is_valid_domain(normalized_url):
+        if (
+            depth > max_depth
+            or normalized_url in self.visited_urls
+            or not self.is_valid_domain(normalized_url)
+            or self.is_excluded_url(normalized_url)
+        ):
             return
 
         self.visited_urls.add(normalized_url)
@@ -173,7 +182,11 @@ class LaspCorpusBuilder:
                     self.download_binary(full_url, 'pdf')
                 elif lower_path.endswith(('.lbl', '.xml')):
                     self.download_binary(full_url, 'pds_data')
-                elif self.is_valid_domain(full_url) and full_url not in self.visited_urls:
+                elif (
+                    self.is_valid_domain(full_url)
+                    and not self.is_excluded_url(full_url)
+                    and full_url not in self.visited_urls
+                ):
                     time.sleep(0.5) # Politeness delay
                     self.scrape_web_and_pds(full_url, depth + 1, max_depth)
 
