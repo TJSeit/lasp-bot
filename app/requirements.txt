@@ -1,0 +1,23 @@
+# App dependencies — installed in the Docker container
+# Pin major versions to keep the image reproducible
+
+# Web framework
+fastapi>=0.111,<1
+uvicorn[standard]>=0.29,<1
+
+# LangChain ecosystem
+langchain>=0.2,<0.4
+langchain-community>=0.2,<0.4
+
+# Embeddings (sentence-transformers, CPU inference in the container)
+sentence-transformers>=2.7,<4
+
+# FAISS — CPU build (no GPU required in Azure Container Apps)
+faiss-cpu>=1.8,<2
+
+# Azure SDKs
+azure-storage-blob>=12.19,<13
+azure-ai-inference>=1.0,<2
+
+# Environment variable loading
+python-dotenv>=1.0,<2
