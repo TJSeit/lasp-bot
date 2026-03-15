@@ -21,6 +21,9 @@ env/
 # PDF source files
 *.pdf
 
+# Corpus content (generated locally)
+indexer/lasp_corpus/
+
 # Docker
 .dockerignore
 
