@@ -50,6 +50,7 @@ class QueryRequest(BaseModel):
 class SourceReference(BaseModel):
     source: str = Field(description="PDF filename or path")
     page: str | int = Field(description="Page number within the PDF")
+    source_url: str = Field(default="", description="Original URL for the source chunk when available")
 
 
 class QueryResponse(BaseModel):

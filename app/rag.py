@@ -123,6 +123,7 @@ def answer_query(
         {
             "source": doc.metadata.get("source", ""),
             "page": doc.metadata.get("page", ""),
+            "source_url": doc.metadata.get("source_url", ""),
         }
         for doc in docs
     ]

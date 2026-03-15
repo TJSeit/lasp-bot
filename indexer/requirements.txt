@@ -21,7 +21,8 @@ sentence-transformers>=2.7,<4
 # FAISS with CUDA support (install the GPU wheel manually if needed)
 # For CUDA 12: pip install faiss-gpu-cu12
 # For CPU fallback: pip install faiss-cpu
-faiss-gpu-cu12
+faiss-gpu-cu12; platform_system == "Linux"
+faiss-cpu; platform_system != "Linux"
 
 # Azure Blob Storage
 azure-storage-blob>=12.19,<13

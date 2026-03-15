@@ -18,11 +18,11 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_doc(content: str, source: str = "lasp_doc.pdf", page: int = 1):
+def _make_fake_doc(content: str, source: str = "lasp_doc.pdf", page: int = 1, source_url: str = ""):
     """Return a minimal langchain Document-like object."""
     doc = MagicMock()
     doc.page_content = content
-    doc.metadata = {"source": source, "page": page}
+    doc.metadata = {"source": source, "page": page, "source_url": source_url}
     return doc
 
 
@@ -67,8 +67,18 @@ class TestAnswerQuery:
 
     def test_returns_answer_and_sources(self):
         docs = [
-            _make_fake_doc("LASP studies space weather.", source="overview.pdf", page=3),
-            _make_fake_doc("Solar wind data is measured at L1.", source="solar.pdf", page=7),
+            _make_fake_doc(
+                "LASP studies space weather.",
+                source="overview.pdf",
+                page=3,
+                source_url="https://lasp.colorado.edu/overview",
+            ),
+            _make_fake_doc(
+                "Solar wind data is measured at L1.",
+                source="solar.pdf",
+                page=7,
+                source_url="https://lasp.colorado.edu/solar",
+            ),
         ]
         retriever = MagicMock()
         retriever.invoke.return_value = docs
@@ -84,6 +94,7 @@ class TestAnswerQuery:
         assert len(result["sources"]) == 2
         assert result["sources"][0]["source"] == "overview.pdf"
         assert result["sources"][0]["page"] == 3
+        assert result["sources"][0]["source_url"] == "https://lasp.colorado.edu/overview"
         assert result["sources"][1]["source"] == "solar.pdf"
 
     def test_passes_context_to_llm(self):
@@ -116,6 +127,7 @@ class TestAnswerQuery:
         result = rag.answer_query(retriever, llm_client, "q?")
         assert result["sources"][0]["source"] == ""
         assert result["sources"][0]["page"] == ""
+        assert result["sources"][0]["source_url"] == ""
 
 
 # ---------------------------------------------------------------------------

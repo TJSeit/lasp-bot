@@ -4,6 +4,7 @@
 
 import os
 import time
+import json
 import logging
 import requests
 from urllib.parse import urljoin, urlparse
@@ -22,7 +23,10 @@ class LaspCorpusBuilder:
     def __init__(self, download_dir, github_token=None):
         self.download_dir = download_dir
         self.github_token = github_token
-        self.visited_urls = set()
+        self.state_file = os.path.join(download_dir, 'crawl_state.json')
+        self.manifest_file = os.path.join(download_dir, 'source_manifest.json')
+        self.visited_urls = self._load_visited_urls()
+        self.source_manifest = self._load_source_manifest()
         
         # Sub-directories for organization
         self.dirs = {
@@ -40,12 +44,73 @@ class LaspCorpusBuilder:
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
         self.session.headers.update({'User-Agent': 'Mozilla/5.0 (LASP RAG Bot Builder)'})
 
+    def _normalize_url(self, url):
+        parsed = urlparse(url)
+        path = parsed.path or '/'
+        if path != '/':
+            path = path.rstrip('/')
+        return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+    def _load_visited_urls(self):
+        if not os.path.exists(self.state_file):
+            return set()
+        try:
+            with open(self.state_file, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+            urls = state.get('visited_urls', [])
+            if isinstance(urls, list):
+                loaded = {self._normalize_url(u) for u in urls if isinstance(u, str)}
+                logging.info(f"[STATE] Loaded {len(loaded)} previously visited URLs")
+                return loaded
+        except Exception as e:
+            logging.warning(f"[STATE] Failed to load crawl state: {e}")
+        return set()
+
+    def _save_visited_urls(self):
+        try:
+            os.makedirs(self.download_dir, exist_ok=True)
+            with open(self.state_file, 'w', encoding='utf-8') as f:
+                json.dump({'visited_urls': sorted(self.visited_urls)}, f, indent=2)
+        except Exception as e:
+            logging.warning(f"[STATE] Failed to save crawl state: {e}")
+
+    def _load_source_manifest(self):
+        if not os.path.exists(self.manifest_file):
+            return {}
+        try:
+            with open(self.manifest_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                logging.info(f"[STATE] Loaded {len(data)} source mappings")
+                return data
+        except Exception as e:
+            logging.warning(f"[STATE] Failed to load source manifest: {e}")
+        return {}
+
+    def _save_source_manifest(self):
+        try:
+            os.makedirs(self.download_dir, exist_ok=True)
+            with open(self.manifest_file, 'w', encoding='utf-8') as f:
+                json.dump(self.source_manifest, f, indent=2, sort_keys=True)
+        except Exception as e:
+            logging.warning(f"[STATE] Failed to save source manifest: {e}")
+
+    def _record_source(self, category, filename, source_url):
+        if not source_url:
+            return
+        relpath = f"{category}/{filename}".replace('\\\\', '/')
+        normalized_url = self._normalize_url(source_url)
+        if self.source_manifest.get(relpath) != normalized_url:
+            self.source_manifest[relpath] = normalized_url
+            self._save_source_manifest()
+
     def is_valid_domain(self, url):
         return 'lasp.colorado.edu' in urlparse(url).netloc
 
-    def save_file(self, content, filename, category, is_binary=False):
+    def save_file(self, content, filename, category, is_binary=False, source_url=None):
         filepath = os.path.join(self.dirs[category], filename)
         if os.path.exists(filepath):
+            self._record_source(category, filename, source_url)
             logging.debug(f"Skipping existing file: {filename}")
             return
 
@@ -54,21 +119,24 @@ class LaspCorpusBuilder:
         
         with open(filepath, mode, encoding=encoding) as f:
             f.write(content)
+        self._record_source(category, filename, source_url)
         logging.info(f"[{category.upper()}] Saved -> {filename}")
 
     def scrape_web_and_pds(self, url, depth=0, max_depth=4):
         """Pillars 1 & 2: Scrape Mission Portals and NASA Data Labels"""
-        if depth > max_depth or url in self.visited_urls or not self.is_valid_domain(url):
+        normalized_url = self._normalize_url(url)
+        if depth > max_depth or normalized_url in self.visited_urls or not self.is_valid_domain(normalized_url):
             return
-            
-        self.visited_urls.add(url)
-        logging.info(f"[CRAWL] Depth {depth} | {url}")
+
+        self.visited_urls.add(normalized_url)
+        self._save_visited_urls()
+        logging.info(f"[CRAWL] Depth {depth} | {normalized_url}")
         
         try:
-            response = self.session.get(url, timeout=15)
+            response = self.session.get(normalized_url, timeout=15)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            logging.warning(f"[ERROR] Failed to fetch {url}: {e}")
+            logging.warning(f"[ERROR] Failed to fetch {normalized_url}: {e}")
             return
 
         content_type = response.headers.get('Content-Type', '').lower()
@@ -82,13 +150,13 @@ class LaspCorpusBuilder:
                 script.decompose()
             text_content = "\n".join([line.strip() for line in soup.get_text().splitlines() if line.strip()])
             
-            safe_name = urlparse(url).path.strip('/').replace('/', '_') or 'index'
-            self.save_file(text_content, f"{safe_name}.txt", 'html_text')
+            safe_name = urlparse(normalized_url).path.strip('/').replace('/', '_') or 'index'
+            self.save_file(text_content, f"{safe_name}.txt", 'html_text', source_url=normalized_url)
 
             # Find links to follow or download
             for link in soup.find_all('a', href=True):
                 href = link.get('href')
-                full_url = urljoin(url, href).split('#')[0]
+                full_url = self._normalize_url(urljoin(normalized_url, href).split('#')[0])
                 
                 # Check for target file types
                 lower_url = full_url.lower()
@@ -105,6 +173,7 @@ class LaspCorpusBuilder:
         filepath = os.path.join(self.dirs[category], filename)
         
         if os.path.exists(filepath):
+            self._record_source(category, filename, url)
             return
             
         logging.info(f"[DOWNLOADING] {filename} from {url}")
@@ -114,6 +183,7 @@ class LaspCorpusBuilder:
             with open(filepath, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
+            self._record_source(category, filename, url)
             logging.info(f"[{category.upper()}] Successfully downloaded -> {filename}")
         except Exception as e:
             logging.warning(f"[ERROR] Binary download failed for {url}: {e}")
@@ -134,12 +204,18 @@ class LaspCorpusBuilder:
             for repo in repos:
                 repo_name = repo['name']
                 logging.info(f"[GITHUB] Checking repo: {repo_name}")
+
+                readme_filename = f"{repo_name}_README.md"
+                readme_path = os.path.join(self.dirs['github'], readme_filename)
+                if os.path.exists(readme_path):
+                    logging.debug(f"[GITHUB] Skipping existing README: {readme_filename}")
+                    continue
                 
                 # Attempt to get README
                 readme_url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{repo['default_branch']}/README.md"
                 readme_r = requests.get(readme_url)
                 if readme_r.status_code == 200:
-                    self.save_file(readme_r.text, f"{repo_name}_README.md", 'github')
+                    self.save_file(readme_r.text, readme_filename, 'github', source_url=readme_url)
                     
         except Exception as e:
             logging.warning(f"[ERROR] GitHub fetch failed. API limit reached? {e}")
@@ -153,7 +229,7 @@ if __name__ == "__main__":
     
     # 1. & 2. Crawl Mission Portals & PDS Labels
     logging.info("=== STARTING PILLAR 1 & 2: WEB AND PDS CRAWL ===")
-    builder.scrape_web_and_pds("https://lasp.colorado.edu/missions/", max_depth=2)
+    builder.scrape_web_and_pds("https://lasp.colorado.edu/missions/", max_depth=4)
     
     # 3. Fetch Engineering GitHub Repos
     logging.info("=== STARTING PILLAR 3: GITHUB REPOS ===")

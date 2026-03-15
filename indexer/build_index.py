@@ -19,6 +19,7 @@ Environment variables (see ../.env.example):
 import os
 import argparse
 import logging
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -48,10 +49,30 @@ AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "
 AZURE_STORAGE_CONTAINER_NAME = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "lasp-index")
 INDEX_BLOB_PREFIX = os.getenv("INDEX_BLOB_PREFIX", "faiss_index")
 
+
+def _load_source_manifest(corpus_path: Path) -> dict[str, str]:
+    manifest_path = corpus_path / "source_manifest.json"
+    if not manifest_path.exists():
+        logging.warning("No source manifest found; source URLs will be missing for some chunks.")
+        return {}
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k): str(v) for k, v in data.items()}
+    except Exception as e:
+        logging.warning(f"Failed to read source manifest: {e}")
+    return {}
+
+
+def _manifest_key_for_path(corpus_path: Path, filepath: Path) -> str:
+    return str(filepath.relative_to(corpus_path)).replace('\\\\', '/')
+
 def load_documents(corpus_dir):
     """Recursively load documents from the corpus directory based on file type."""
     documents = []
     corpus_path = Path(corpus_dir)
+    source_manifest = _load_source_manifest(corpus_path)
     
     if not corpus_path.exists():
         logging.error(f"Corpus directory '{corpus_dir}' does not exist.")
@@ -80,8 +101,14 @@ def load_documents(corpus_dir):
                         loader = loader_class(str(filepath), autodetect_encoding=True)
                     else:
                         loader = loader_class(str(filepath))
-                        
-                    documents.extend(loader.load())
+
+                    loaded_docs = loader.load()
+                    source_url = source_manifest.get(_manifest_key_for_path(corpus_path, filepath), "")
+                    for doc in loaded_docs:
+                        doc.metadata["source_file"] = filepath.name
+                        if source_url:
+                            doc.metadata["source_url"] = source_url
+                    documents.extend(loaded_docs)
                 except Exception as e:
                     logging.warning(f"Failed to load {filepath.name}: {e}")
             else:
