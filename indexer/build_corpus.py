@@ -8,6 +8,7 @@ import json
 import logging
 import requests
 from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -218,6 +219,83 @@ class LaspCorpusBuilder:
         except Exception as e:
             logging.warning(f"[ERROR] Binary download failed for {url}: {e}")
 
+    def fetch_sitemap_urls(self, sitemap_url):
+        """Fetch all page URLs from a sitemap or sitemap index file.
+
+        Handles both standard sitemaps (<urlset>) and sitemap index files
+        (<sitemapindex>) that reference child sitemaps.  Returns a flat list
+        of every <loc> URL found.
+        """
+        urls = []
+        logging.info(f"[SITEMAP] Fetching: {sitemap_url}")
+        try:
+            response = self.session.get(sitemap_url, timeout=15)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logging.warning(f"[SITEMAP] Failed to fetch {sitemap_url}: {e}")
+            return urls
+
+        try:
+            root = ElementTree.fromstring(response.content)
+        except ElementTree.ParseError as e:
+            logging.warning(f"[SITEMAP] Failed to parse XML from {sitemap_url}: {e}")
+            return urls
+
+        # Strip XML namespace prefix for portable tag comparison.
+        def _local(tag):
+            return tag.split('}', 1)[-1] if '}' in tag else tag
+
+        root_tag = _local(root.tag)
+
+        if root_tag == 'sitemapindex':
+            # Sitemap index: recurse into each child sitemap.
+            for child in root:
+                if _local(child.tag) == 'sitemap':
+                    for elem in child:
+                        if _local(elem.tag) == 'loc' and elem.text:
+                            urls.extend(self.fetch_sitemap_urls(elem.text.strip()))
+        elif root_tag == 'urlset':
+            # Regular sitemap: collect all <url><loc> entries.
+            for child in root:
+                if _local(child.tag) == 'url':
+                    for elem in child:
+                        if _local(elem.tag) == 'loc' and elem.text:
+                            urls.append(elem.text.strip())
+        else:
+            logging.warning(f"[SITEMAP] Unexpected root element <{root_tag}> in {sitemap_url}")
+
+        logging.info(f"[SITEMAP] Found {len(urls)} URLs in {sitemap_url}")
+        return urls
+
+    def crawl_from_sitemap(self, sitemap_url):
+        """Discover all LASP pages via sitemap then scrape each one.
+
+        This is more efficient than pure recursive link-following because
+        the sitemap already enumerates every published URL.  Only one level
+        of additional link-following (max_depth=1) is performed per page so
+        that any PDFs or PDS labels linked from a page are still captured.
+
+        Returns the number of new URLs queued for scraping (0 if the sitemap
+        was empty or unreachable, so callers can fall back to the old crawl).
+        """
+        all_urls = self.fetch_sitemap_urls(sitemap_url)
+        valid_urls = [
+            url for url in all_urls
+            if self.is_valid_domain(url) and not self.is_excluded_url(url)
+        ]
+        logging.info(
+            f"[SITEMAP] {len(valid_urls)} valid LASP URLs to crawl "
+            f"(out of {len(all_urls)} total)"
+        )
+        queued = 0
+        for url in valid_urls:
+            normalized = self._normalize_url(url)
+            if normalized not in self.visited_urls:
+                time.sleep(0.5)
+                self.scrape_web_and_pds(normalized, depth=0, max_depth=1)
+                queued += 1
+        return queued
+
     def fetch_github_repos(self, org="lasp"):
         """Pillar 3: Pull READMEs and Docs from LASP GitHub using API"""
         logging.info(f"[GITHUB] Fetching repositories for {org}...")
@@ -257,9 +335,15 @@ if __name__ == "__main__":
     
     builder = LaspCorpusBuilder(download_dir="lasp_corpus", github_token=github_pat)
     
-    # 1. & 2. Crawl Mission Portals & PDS Labels
+    # 1. & 2. Crawl Mission Portals & PDS Labels via sitemap, falling back to
+    #         the recursive link-following crawl if the sitemap is unavailable.
     logging.info("=== STARTING PILLAR 1 & 2: WEB AND PDS CRAWL ===")
-    builder.scrape_web_and_pds("https://lasp.colorado.edu/missions/", max_depth=4)
+    queued = builder.crawl_from_sitemap("https://lasp.colorado.edu/sitemap.xml")
+    if queued == 0:
+        logging.warning(
+            "[SITEMAP] No URLs found via sitemap — falling back to recursive crawl"
+        )
+        builder.scrape_web_and_pds("https://lasp.colorado.edu/missions/", max_depth=4)
     
     # 3. Fetch Engineering GitHub Repos
     logging.info("=== STARTING PILLAR 3: GITHUB REPOS ===")
