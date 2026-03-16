@@ -17,10 +17,10 @@ urllib3>=2.6.3
 pypdf>=3.17,<5
 
 # LangChain ecosystem
-langchain
-langchain-community
-langchain-huggingface
-langchain-text-splitters
+langchain>=1,<2
+langchain-community>=1,<2
+langchain-huggingface>=1,<2
+langchain-text-splitters>=1,<2
 
 # Embeddings (sentence-transformers)
 sentence-transformers>=2.7,<4
