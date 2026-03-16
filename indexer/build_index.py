@@ -19,6 +19,8 @@ import logging
 import json
 from pathlib import Path
 
+import torch
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -129,11 +131,14 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
     chunks = text_splitter.split_documents(docs)
     logging.info(f"Created {len(chunks)} text chunks.")
 
-    # 3. Initialize GPU Embeddings
-    logging.info(f"Initializing HuggingFace Embeddings (model={EMBEDDING_MODEL}) on CUDA...")
+    # 3. Initialize Embeddings (GPU if available, otherwise CPU)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if device == 'cpu':
+        logging.warning("CUDA is not available; falling back to CPU for embeddings (indexing will be slower).")
+    logging.info(f"Initializing HuggingFace Embeddings (model={EMBEDDING_MODEL}) on {device.upper()}...")
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL,
-        model_kwargs={'device': 'cuda'},
+        model_kwargs={'device': device},
         encode_kwargs={'normalize_embeddings': True} # Better for cosine similarity
     )
 

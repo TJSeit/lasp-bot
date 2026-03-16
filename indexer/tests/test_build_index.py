@@ -8,6 +8,7 @@ without any network access or GPU.
 import logging
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -113,3 +114,41 @@ class TestPypdfWarningsSuppressed:
         """
         pypdf_logger = logging.getLogger("pypdf")
         assert pypdf_logger.level == logging.ERROR
+
+
+class TestBuildIndexDeviceSelection:
+    """build_index selects the correct device depending on CUDA availability."""
+
+    def _run_build_index(self, tmp_path, cuda_available: bool):
+        """Helper: run build_index with a single .txt document and the given
+        CUDA availability, mocking out HuggingFaceEmbeddings and FAISS so that
+        no real GPU or model download is required."""
+        import build_index as bi
+
+        (tmp_path / "doc.txt").write_text("Hello world.", encoding="utf-8")
+
+        captured = {}
+        mock_embeddings = MagicMock()
+        mock_vector_db = MagicMock()
+
+        def fake_hf_embeddings(**kwargs):
+            captured.update(kwargs)
+            return mock_embeddings
+
+        with patch("build_index.torch.cuda.is_available", return_value=cuda_available), \
+             patch("build_index.HuggingFaceEmbeddings", side_effect=fake_hf_embeddings), \
+             patch("build_index.FAISS") as mock_faiss:
+            mock_faiss.from_documents.return_value = mock_vector_db
+            bi.build_index(str(tmp_path), output_dir=str(tmp_path / "index"))
+
+        return captured
+
+    def test_uses_cuda_when_available(self, tmp_path):
+        """When CUDA is available, the embedding model is placed on 'cuda'."""
+        captured = self._run_build_index(tmp_path, cuda_available=True)
+        assert captured.get("model_kwargs", {}).get("device") == "cuda"
+
+    def test_falls_back_to_cpu_when_cuda_unavailable(self, tmp_path):
+        """When CUDA is unavailable, the embedding model falls back to 'cpu'."""
+        captured = self._run_build_index(tmp_path, cuda_available=False)
+        assert captured.get("model_kwargs", {}).get("device") == "cpu"
