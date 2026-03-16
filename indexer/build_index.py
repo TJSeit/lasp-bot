@@ -61,7 +61,7 @@ def _load_source_manifest(corpus_path: Path) -> dict[str, str]:
 
 
 def _manifest_key_for_path(corpus_path: Path, filepath: Path) -> str:
-    return str(filepath.relative_to(corpus_path)).replace('\\\\', '/')
+    return str(filepath.relative_to(corpus_path)).replace('\\', '/')
 
 def load_documents(corpus_dir):
     """Recursively load documents from the corpus directory based on file type."""
@@ -134,7 +134,15 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
     # 3. Initialize Embeddings (GPU if available, otherwise CPU)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if device == 'cpu':
-        logging.warning("CUDA is not available; falling back to CPU for embeddings (indexing will be slower).")
+        logging.warning(
+            "CUDA is not available. If you have an NVIDIA GPU, ensure you have "
+            "installed the CUDA-enabled PyTorch wheel (the CPU-only wheel is "
+            "installed by default when torch is resolved from PyPI). "
+            "Re-run: pip install -r requirements.txt  — the requirements file "
+            "includes --extra-index-url https://download.pytorch.org/whl/cu124 "
+            "which provides the correct CUDA build. Falling back to CPU "
+            "(indexing will be significantly slower)."
+        )
     logging.info(f"Initializing HuggingFace Embeddings (model={EMBEDDING_MODEL}) on {device.upper()}...")
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL,

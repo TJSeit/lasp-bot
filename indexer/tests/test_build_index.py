@@ -101,6 +101,32 @@ class TestLoadDocuments:
 
         assert docs[0].metadata.get("source_url") == "https://example.com/page"
 
+    def test_source_url_populated_from_manifest_in_subdir(self, tmp_path):
+        """source_url is resolved correctly for files in sub-directories.
+
+        On Windows, Path.relative_to() uses backslash separators.  The
+        manifest keys use forward slashes (e.g. ``subdir/file.md``).  The old
+        code called ``.replace('\\\\', '/')`` which, at runtime, only matched
+        the two-character sequence ``\\`` (double-backslash); it never matched
+        the single backslash ``\\`` Windows path separator, so the manifest
+        lookup silently returned an empty string.  The fix changes the pattern
+        to ``.replace('\\', '/')`` so individual Windows separators are
+        normalised to forward slashes before the lookup.
+        """
+        import json
+
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        _write(subdir / "doc.md", "# Sub document")
+        manifest = {"subdir/doc.md": "https://example.com/subdoc"}
+        (tmp_path / "source_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+
+        docs = load_documents(str(tmp_path))
+
+        assert docs[0].metadata.get("source_url") == "https://example.com/subdoc"
+
 
 class TestPypdfWarningsSuppressed:
     """pypdf 'wrong pointing object' warnings must not reach the console."""
