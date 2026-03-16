@@ -18,6 +18,9 @@ langchain-text-splitters
 # Embeddings (sentence-transformers)
 sentence-transformers>=2.7,<4
 
+# HuggingFace Hub Xet Storage support (faster model downloads)
+hf_xet>=1.0,<2
+
 # FAISS with CUDA support (install the GPU wheel manually if needed)
 # For CUDA 12: pip install faiss-gpu-cu12
 # For CPU fallback: pip install faiss-cpu
