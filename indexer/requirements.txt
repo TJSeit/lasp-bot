@@ -1,5 +1,12 @@
 # Indexer dependencies — run locally on a machine with an NVIDIA GPU
 # Install with: pip install -r requirements.txt
+#
+# NOTE: The extra index URL below is required to install the CUDA-enabled
+# PyTorch wheel.  Without it pip resolves torch from PyPI, which ships only
+# the CPU-only build.  That causes torch.cuda.is_available() to return False
+# even on a machine with a supported NVIDIA GPU (e.g. RTX 4070 Ti), and
+# build_index.py fails when trying to initialise GPU embeddings.
+--extra-index-url https://download.pytorch.org/whl/cu130
 
 # Scraping Dependencies
 requests
@@ -17,6 +24,14 @@ langchain-text-splitters
 
 # Embeddings (sentence-transformers)
 sentence-transformers>=2.7,<4
+
+# PyTorch — must be listed explicitly so the CUDA wheel from the extra index
+# above is selected rather than the CPU-only wheel from PyPI.
+# Minimum 2.6 required to resolve known deserialization vulnerabilities:
+#   CVE-2024-31580 (heap buffer overflow, < 2.2.0)
+#   CVE-2024-31583 (use-after-free, < 2.2.0)
+#   CVE-2025-32434 (torch.load weights_only=True RCE, < 2.6.0)
+torch>=2.6,<3
 
 # HuggingFace Hub Xet Storage support (faster model downloads)
 hf_xet>=1.0,<2

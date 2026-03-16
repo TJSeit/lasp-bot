@@ -8,6 +8,7 @@ without any network access or GPU.
 import logging
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -100,6 +101,32 @@ class TestLoadDocuments:
 
         assert docs[0].metadata.get("source_url") == "https://example.com/page"
 
+    def test_source_url_populated_from_manifest_in_subdir(self, tmp_path):
+        """source_url is resolved correctly for files in sub-directories.
+
+        On Windows, Path.relative_to() uses backslash separators.  The
+        manifest keys use forward slashes (e.g. ``subdir/file.md``).  The old
+        code called ``.replace('\\\\', '/')`` which, at runtime, only matched
+        the two-character sequence ``\\`` (double-backslash); it never matched
+        the single backslash ``\\`` Windows path separator, so the manifest
+        lookup silently returned an empty string.  The fix changes the pattern
+        to ``.replace('\\', '/')`` so individual Windows separators are
+        normalised to forward slashes before the lookup.
+        """
+        import json
+
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        _write(subdir / "doc.md", "# Sub document")
+        manifest = {"subdir/doc.md": "https://example.com/subdoc"}
+        (tmp_path / "source_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+
+        docs = load_documents(str(tmp_path))
+
+        assert docs[0].metadata.get("source_url") == "https://example.com/subdoc"
+
 
 class TestPypdfWarningsSuppressed:
     """pypdf 'wrong pointing object' warnings must not reach the console."""
@@ -113,3 +140,41 @@ class TestPypdfWarningsSuppressed:
         """
         pypdf_logger = logging.getLogger("pypdf")
         assert pypdf_logger.level == logging.ERROR
+
+
+class TestBuildIndexDeviceSelection:
+    """build_index selects the correct device depending on CUDA availability."""
+
+    def _run_build_index(self, tmp_path, cuda_available: bool):
+        """Helper: run build_index with a single .txt document and the given
+        CUDA availability, mocking out HuggingFaceEmbeddings and FAISS so that
+        no real GPU or model download is required."""
+        import build_index as bi
+
+        (tmp_path / "doc.txt").write_text("Hello world.", encoding="utf-8")
+
+        captured = {}
+        mock_embeddings = MagicMock()
+        mock_vector_db = MagicMock()
+
+        def fake_hf_embeddings(**kwargs):
+            captured.update(kwargs)
+            return mock_embeddings
+
+        with patch("build_index.torch.cuda.is_available", return_value=cuda_available), \
+             patch("build_index.HuggingFaceEmbeddings", side_effect=fake_hf_embeddings), \
+             patch("build_index.FAISS") as mock_faiss:
+            mock_faiss.from_documents.return_value = mock_vector_db
+            bi.build_index(str(tmp_path), output_dir=str(tmp_path / "index"))
+
+        return captured
+
+    def test_uses_cuda_when_available(self, tmp_path):
+        """When CUDA is available, the embedding model is placed on 'cuda'."""
+        captured = self._run_build_index(tmp_path, cuda_available=True)
+        assert captured.get("model_kwargs", {}).get("device") == "cuda"
+
+    def test_falls_back_to_cpu_when_cuda_unavailable(self, tmp_path):
+        """When CUDA is unavailable, the embedding model falls back to 'cpu'."""
+        captured = self._run_build_index(tmp_path, cuda_available=False)
+        assert captured.get("model_kwargs", {}).get("device") == "cpu"
