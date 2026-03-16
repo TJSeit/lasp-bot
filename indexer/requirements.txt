@@ -6,7 +6,7 @@
 # the CPU-only build.  That causes torch.cuda.is_available() to return False
 # even on a machine with a supported NVIDIA GPU (e.g. RTX 4070 Ti), and
 # build_index.py fails when trying to initialise GPU embeddings.
---extra-index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://download.pytorch.org/whl/cu130
 
 # Scraping Dependencies
 requests
