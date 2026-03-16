@@ -34,6 +34,9 @@ from langchain_community.vectorstores import FAISS
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+# Suppress noisy pypdf warnings about malformed PDF internal references
+# (e.g. "Ignoring wrong pointing object") — pypdf handles these gracefully.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
