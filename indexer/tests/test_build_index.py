@@ -5,6 +5,7 @@ All file I/O is performed against a temporary directory so the tests run
 without any network access or GPU.
 """
 
+import logging
 import os
 import sys
 
@@ -98,3 +99,17 @@ class TestLoadDocuments:
         docs = load_documents(str(tmp_path))
 
         assert docs[0].metadata.get("source_url") == "https://example.com/page"
+
+
+class TestPypdfWarningsSuppressed:
+    """pypdf 'wrong pointing object' warnings must not reach the console."""
+
+    def test_pypdf_logger_level_is_error(self):
+        """The pypdf logger must be configured at ERROR level so that
+        'Ignoring wrong pointing object' warnings are silenced.
+
+        build_index is imported at module level above, so its logger
+        configuration code has already executed by the time this test runs.
+        """
+        pypdf_logger = logging.getLogger("pypdf")
+        assert pypdf_logger.level == logging.ERROR
