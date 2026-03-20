@@ -19,9 +19,9 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from rag import answer_query, build_rag_chain
-
 load_dotenv()
+
+from rag import answer_query, build_rag_chain
 
 DISCORD_TOKEN: str | None = os.getenv("DISCORD_TOKEN")
 DISCORD_COMMAND_PREFIX: str = os.getenv("DISCORD_COMMAND_PREFIX", "!")

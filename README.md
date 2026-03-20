@@ -92,6 +92,38 @@ generates embeddings on the local GPU, and saves a FAISS index to
 
 ### 4 — Run the FastAPI app locally
 
+Before starting the app, make sure `FAISS_INDEX_DIR` in your `.env` file points
+to the index directory created in step 3.  By default the indexer saves the
+index to `lasp_faiss_index/` **inside the `indexer/` directory**, but the app
+runs from the `app/` directory, so the paths don't line up automatically.
+
+Open your `.env` file and set an absolute path (recommended) or a path
+relative to the `app/` directory:
+
+**Linux / macOS**
+```dotenv
+FAISS_INDEX_DIR=/absolute/path/to/indexer/lasp_faiss_index
+# — or relative from app/ —
+FAISS_INDEX_DIR=../indexer/lasp_faiss_index
+```
+
+**Windows** (use forward slashes — Python accepts them on Windows and they avoid `.env` parsing issues)
+```dotenv
+FAISS_INDEX_DIR=C:/Users/you/lasp-bot/indexer/lasp_faiss_index
+```
+
+> **Tip (Windows PowerShell):** you can set the variable for the current
+> session without editing `.env`:
+> ```powershell
+> $env:FAISS_INDEX_DIR = "C:/Users/you/lasp-bot/indexer/lasp_faiss_index"
+> ```
+> **Tip (Windows Command Prompt):**
+> ```cmd
+> set FAISS_INDEX_DIR=C:/Users/you/lasp-bot/indexer/lasp_faiss_index
+> ```
+
+Then install dependencies and start the server:
+
 ```bash
 cd app
 pip install -r requirements.txt
