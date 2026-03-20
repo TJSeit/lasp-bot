@@ -157,6 +157,80 @@ class TestFetchSitemapUrls:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# _record_source
+# ---------------------------------------------------------------------------
+
+
+class TestRecordSource:
+    """_record_source writes manifest keys that match actual file paths."""
+
+    def test_pdf_key_uses_actual_subdirectory_name(self, tmp_path):
+        """Manifest key for PDFs must use 'pdfs/', not 'pdf/'."""
+        import json
+
+        builder = _make_builder(tmp_path)
+        builder._record_source("pdf", "document.pdf", "https://lasp.colorado.edu/doc.pdf")
+
+        with open(tmp_path / "source_manifest.json", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        assert "pdfs/document.pdf" in manifest
+        assert manifest["pdfs/document.pdf"] == "https://lasp.colorado.edu/doc.pdf"
+
+    def test_html_text_key_uses_actual_subdirectory_name(self, tmp_path):
+        """Manifest key for web text must use 'web_text/', not 'html_text/'."""
+        import json
+
+        builder = _make_builder(tmp_path)
+        builder._record_source("html_text", "page.txt", "https://lasp.colorado.edu/page")
+
+        with open(tmp_path / "source_manifest.json", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        assert "web_text/page.txt" in manifest
+
+    def test_github_key_uses_actual_subdirectory_name(self, tmp_path):
+        """Manifest key for GitHub docs must use 'github_docs/', not 'github/'."""
+        import json
+
+        builder = _make_builder(tmp_path)
+        builder._record_source(
+            "github",
+            "repo_README.md",
+            "https://raw.githubusercontent.com/lasp/repo/main/README.md",
+        )
+
+        with open(tmp_path / "source_manifest.json", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        assert "github_docs/repo_README.md" in manifest
+
+    def test_pds_data_key_uses_actual_subdirectory_name(self, tmp_path):
+        """Manifest key for PDS data must use 'pds_metadata/', not 'pds_data/'."""
+        import json
+
+        builder = _make_builder(tmp_path)
+        builder._record_source("pds_data", "label.xml", "https://lasp.colorado.edu/label.xml")
+
+        with open(tmp_path / "source_manifest.json", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        assert "pds_metadata/label.xml" in manifest
+
+    def test_no_manifest_entry_when_source_url_is_empty(self, tmp_path):
+        """_record_source must not write a manifest when source_url is empty."""
+        builder = _make_builder(tmp_path)
+        builder._record_source("pdf", "document.pdf", "")
+
+        assert not (tmp_path / "source_manifest.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# crawl_from_sitemap
+# ---------------------------------------------------------------------------
+
+
 class TestCrawlFromSitemap:
     """LaspCorpusBuilder.crawl_from_sitemap filters and scrapes valid URLs."""
 
