@@ -22,7 +22,7 @@ import os
 from typing import Any
 
 import ollama
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 FAISS_INDEX_DIR = os.getenv("FAISS_INDEX_DIR", "lasp_faiss_index")

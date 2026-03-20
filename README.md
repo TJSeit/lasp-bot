@@ -95,7 +95,7 @@ generates embeddings on the local GPU, and saves a FAISS index to
 ```bash
 cd app
 pip install -r requirements.txt
-uvicorn main:app --reload
+python -m uvicorn main:app --reload
 ```
 
 Open <http://localhost:8000/docs> for the interactive Swagger UI.

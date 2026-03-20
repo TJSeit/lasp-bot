@@ -18,7 +18,7 @@ pypdf>=3.17,<5
 
 # LangChain ecosystem
 langchain>=1,<2
-langchain-community>=1,<2
+langchain-community>=0.4,<1
 langchain-huggingface>=1,<2
 langchain-text-splitters>=1,<2
 
