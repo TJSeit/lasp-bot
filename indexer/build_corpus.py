@@ -100,7 +100,8 @@ class LaspCorpusBuilder:
     def _record_source(self, category, filename, source_url):
         if not source_url:
             return
-        relpath = f"{category}/{filename}".replace('\\\\', '/')
+        dir_relpath = os.path.relpath(self.dirs[category], self.download_dir).replace('\\', '/')
+        relpath = f"{dir_relpath}/{filename}"
         normalized_url = self._normalize_url(source_url)
         if self.source_manifest.get(relpath) != normalized_url:
             self.source_manifest[relpath] = normalized_url
