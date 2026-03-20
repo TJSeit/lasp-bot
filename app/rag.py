@@ -22,8 +22,11 @@ import os
 from typing import Any
 
 import ollama
+from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+
+load_dotenv()
 
 FAISS_INDEX_DIR = os.getenv("FAISS_INDEX_DIR", "lasp_faiss_index")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
