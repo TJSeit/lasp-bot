@@ -108,6 +108,23 @@ class TestAnswerQuery:
         assert "Important context." in user_msg_content
         assert "My question?" in user_msg_content
 
+    def test_system_prompt_instructs_technical_answers(self):
+        docs = [_make_fake_doc("Some context.")]
+        retriever = MagicMock()
+        retriever.invoke.return_value = docs
+
+        llm_client = MagicMock()
+        llm_client.chat.return_value = _make_fake_llm_response("Answer.")
+
+        rag.answer_query(retriever, llm_client, "A question?")
+
+        call_kwargs = llm_client.chat.call_args
+        messages = call_kwargs.kwargs["messages"]
+        system_msg_content = messages[0]["content"]
+        # System prompt should guide the LLM toward technical responses
+        assert "technically" in system_msg_content.lower()
+        assert messages[0]["role"] == "system"
+
     def test_empty_sources_when_no_metadata(self):
         doc = MagicMock()
         doc.page_content = "Some text."
