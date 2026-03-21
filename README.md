@@ -75,6 +75,10 @@ cp .env.example .env
 | `CHUNK_OVERLAP` | Chunk overlap for indexer (default: `64`) |
 | `DISCORD_TOKEN` | Discord bot token — required for `discord_bot.py` |
 | `DISCORD_COMMAND_PREFIX` | Command prefix for Discord bot (default: `!`) |
+| `MMS_SDC_BASE_URL` | MMS SDC API base URL (default: `https://lasp.colorado.edu/mms/sdc/public/files/api/v1`) |
+| `MMS_SDC_TIMEOUT` | HTTP timeout for MMS SDC requests in seconds (default: `30`) |
+| `LISIRD_BASE_URL` | LaTiS DAP2 API base URL (default: `https://lasp.colorado.edu/lisird/latis/dap2`) |
+| `LISIRD_TIMEOUT` | HTTP timeout for LISIRD requests in seconds (default: `30`) |
 
 ### 3 — Build the FAISS index (local, GPU)
 
@@ -216,6 +220,65 @@ pytest tests/ -v
 
 ---
 
+## LISIRD MCP Tool
+
+`app/lisird_mcp.py` is a standalone **Model Context Protocol (MCP)** server
+that exposes two tools for querying solar irradiance and space weather datasets
+through the [LASP Interactive Solar IRradiance Datacenter (LISIRD)](https://lasp.colorado.edu/lisird/)
+via the **LaTiS DAP2 API** — the data access library underlying both LISIRD and
+the Space Weather Data Portal. It provides access to 130+ solar datasets from
+LASP, NASA, NOAA, and NSO through a "Functional Data Model" that allows
+SQL-like querying directly in the URL.
+
+| Tool | Description |
+|------|-------------|
+| `list_lisird_datasets` | List all datasets available through LISIRD (returns identifiers, titles, and descriptions) |
+| `query_solar_irradiance` | Query measurements from a specific dataset with optional time-range filtering and variable projection |
+
+### `query_solar_irradiance` parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dataset_id` | *(required)* | LaTiS dataset identifier, e.g. `sorce_tsi_24hr`. Use `list_lisird_datasets` to browse all identifiers. |
+| `start_date` | `None` | Start of the time range (inclusive) — ISO 8601 date or timestamp, e.g. `2003-01-01` |
+| `end_date` | `None` | End of the time range (inclusive) — ISO 8601 date or timestamp, e.g. `2003-12-31` |
+| `variables` | `None` | Comma-separated variable projection, e.g. `time,tsi`. Leave blank to return all variables. |
+| `output_format` | `json` | Response format: `json` or `csv` |
+
+### Running the LISIRD MCP server
+
+```bash
+cd app
+pip install -r requirements.txt
+python lisird_mcp.py
+```
+
+The server speaks the MCP stdio transport by default and can be connected to
+any MCP-compatible client (e.g. Claude Desktop, MCP Inspector).
+
+### Example usage
+
+```python
+# Fetch daily total solar irradiance from SORCE for January 2020,
+# returning only the time and tsi variables as JSON
+query_solar_irradiance(
+    dataset_id="sorce_tsi_24hr",
+    start_date="2020-01-01",
+    end_date="2020-01-31",
+    variables="time,tsi",
+)
+# URL: .../sorce_tsi_24hr.json?time,tsi&time>=2020-01-01&time<=2020-01-31
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LISIRD_BASE_URL` | `https://lasp.colorado.edu/lisird/latis/dap2` | LaTiS DAP2 API base URL |
+| `LISIRD_TIMEOUT` | `30` | HTTP request timeout in seconds |
+
+---
+
 ## MMS SDC MCP Tool
 
 `app/mms_sdc_mcp.py` is a standalone **Model Context Protocol (MCP)** server
@@ -272,12 +335,14 @@ lasp-bot/
 │   ├── rag.py           # RAG pipeline (local FAISS + Ollama)
 │   ├── discord_bot.py   # Discord bot (!ask / !lasp commands)
 │   ├── mms_sdc_mcp.py   # MCP server: MMS SDC query tools
+│   ├── lisird_mcp.py    # MCP server: LISIRD solar irradiance tools
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── tests/
 │       ├── test_rag.py
 │       ├── test_discord_bot.py
-│       └── test_mms_sdc_mcp.py
+│       ├── test_mms_sdc_mcp.py
+│       └── test_lisird_mcp.py
 ├── .env.example
 └── README.md
 ```
