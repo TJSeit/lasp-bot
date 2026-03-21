@@ -22,5 +22,11 @@ ollama>=0.4,<1
 # Environment variable loading
 python-dotenv>=1.0,<2
 
+# MCP (Model Context Protocol) server
+mcp>=1.0,<2
+
+# HTTP client (used by the MMS SDC MCP tool)
+httpx>=0.27,<1
+
 # Discord bot
 discord.py>=2.3,<3

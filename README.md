@@ -216,6 +216,50 @@ pytest tests/ -v
 
 ---
 
+## MMS SDC MCP Tool
+
+`app/mms_sdc_mcp.py` is a standalone **Model Context Protocol (MCP)** server
+that exposes two tools for querying the
+[MMS Science Data Center](https://lasp.colorado.edu/mms/sdc/public/) (SDC)
+public REST API.
+
+| Tool | Description |
+|------|-------------|
+| `list_mms_files` | Query available MMS science data files (returns metadata) |
+| `get_mms_file_urls` | Retrieve HTTPS download URLs for matching files |
+
+Both tools accept the same filter parameters:
+
+| Parameter | Values | Description |
+|-----------|--------|-------------|
+| `sc_id` | `mms1`, `mms2`, `mms3`, `mms4` | Spacecraft ID (comma-separated) |
+| `instrument_id` | `fgm`, `fpi`, `edp`, `hpca`, `mec`, `scm`, `edi`, `feeps`, `epd-eis`, `aspoc`, `dsp`, `ulf`, `afg`, `sdp` | Instrument (comma-separated) |
+| `data_rate_mode` | `srvy`, `brst`, `fast`, `slow` | Data rate (comma-separated) |
+| `data_level` | `l1a`, `l1b`, `l2`, `l2pre`, `l3`, `ql` | Processing level (comma-separated) |
+| `start_date` | `YYYY-MM-DD` | Start of time range |
+| `end_date` | `YYYY-MM-DD` | End of time range |
+| `version` | e.g. `3.3.0` | File version (optional) |
+
+### Running the MCP server
+
+```bash
+cd app
+pip install -r requirements.txt
+python mms_sdc_mcp.py
+```
+
+The server speaks the MCP stdio transport by default and can be connected to
+any MCP-compatible client (e.g. Claude Desktop, MCP Inspector).
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MMS_SDC_BASE_URL` | `https://lasp.colorado.edu/mms/sdc/public/files/api/v1` | MMS SDC API base URL |
+| `MMS_SDC_TIMEOUT` | `30` | HTTP request timeout in seconds |
+
+---
+
 ## Repository Structure
 
 ```
@@ -227,11 +271,13 @@ lasp-bot/
 │   ├── main.py          # FastAPI application
 │   ├── rag.py           # RAG pipeline (local FAISS + Ollama)
 │   ├── discord_bot.py   # Discord bot (!ask / !lasp commands)
+│   ├── mms_sdc_mcp.py   # MCP server: MMS SDC query tools
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── tests/
 │       ├── test_rag.py
-│       └── test_discord_bot.py
+│       ├── test_discord_bot.py
+│       └── test_mms_sdc_mcp.py
 ├── .env.example
 └── README.md
 ```
