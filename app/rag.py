@@ -75,9 +75,20 @@ def answer_query(
     retriever: Any,
     llm_client: ollama.Client,
     question: str,
+    history: list[dict] | None = None,
 ) -> dict:
     """
     Retrieve relevant chunks and call the local Ollama model.
+
+    Args:
+        retriever:   LangChain retriever backed by the FAISS index.
+        llm_client:  Ollama client used for LLM inference.
+        question:    The user's current question.
+        history:     Optional list of prior conversation turns, each a dict
+                     with ``role`` ("user" or "assistant") and ``content`` keys.
+                     When provided these are inserted between the system prompt
+                     and the current user message so the model can refer back
+                     to earlier exchanges.
 
     Returns a dict with:
         answer  (str)  — model-generated answer
@@ -94,12 +105,15 @@ def answer_query(
         for doc in docs
     ]
 
+    messages: list[dict] = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        *(history or []),
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
+    ]
+
     response = llm_client.chat(
         model=OLLAMA_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
-        ],
+        messages=messages,
         options={"temperature": 0.0, "num_predict": 1024},
     )
     answer = response.message.content

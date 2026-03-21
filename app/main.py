@@ -11,7 +11,7 @@ once on startup via a lifespan context manager so it is shared across requests.
 """
 
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -43,8 +43,17 @@ app = FastAPI(
 )
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"] = Field(description="Role of the message author")
+    content: str = Field(min_length=1, description="Message content")
+
+
 class QueryRequest(BaseModel):
     question: Annotated[str, Field(min_length=1, max_length=2000, description="Question to ask the LASP bot")]
+    history: list[ConversationTurn] = Field(
+        default=[],
+        description="Prior conversation turns to include for multi-turn dialogue",
+    )
 
 
 class SourceReference(BaseModel):
@@ -81,7 +90,8 @@ async def query(request: QueryRequest):
     if "retriever" not in _state:
         raise HTTPException(status_code=503, detail="RAG chain not yet initialised.")
     try:
-        result = answer_query(_state["retriever"], _state["llm_client"], request.question)
+        history = [{"role": t.role, "content": t.content} for t in request.history]
+        result = answer_query(_state["retriever"], _state["llm_client"], request.question, history)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return QueryResponse(**result)
