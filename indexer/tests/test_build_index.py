@@ -148,33 +148,58 @@ class TestBuildIndexDeviceSelection:
     def _run_build_index(self, tmp_path, cuda_available: bool):
         """Helper: run build_index with a single .txt document and the given
         CUDA availability, mocking out HuggingFaceEmbeddings and FAISS so that
-        no real GPU or model download is required."""
+        no real GPU or model download is required.
+
+        Returns (all_hf_calls, mock_faiss) so callers can inspect which
+        HuggingFaceEmbeddings instances were created and which FAISS factory
+        method was invoked.
+        """
         import build_index as bi
 
         (tmp_path / "doc.txt").write_text("Hello world.", encoding="utf-8")
 
-        captured = {}
-        mock_embeddings = MagicMock()
-        mock_vector_db = MagicMock()
+        all_hf_calls: list[dict] = []
 
         def fake_hf_embeddings(**kwargs):
-            captured.update(kwargs)
-            return mock_embeddings
+            all_hf_calls.append(kwargs)
+            mock_emb = MagicMock()
+            # embed_documents must return a list of vectors (one per document).
+            mock_emb.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+            return mock_emb
+
+        mock_vector_db = MagicMock()
 
         with patch("build_index.torch.cuda.is_available", return_value=cuda_available), \
              patch("build_index.HuggingFaceEmbeddings", side_effect=fake_hf_embeddings), \
              patch("build_index.FAISS") as mock_faiss:
             mock_faiss.from_documents.return_value = mock_vector_db
+            mock_faiss.from_embeddings.return_value = mock_vector_db
             bi.build_index(str(tmp_path), output_dir=str(tmp_path / "index"))
 
-        return captured
+        return all_hf_calls, mock_faiss
 
     def test_uses_cuda_when_available(self, tmp_path):
-        """When CUDA is available, the embedding model is placed on 'cuda'."""
-        captured = self._run_build_index(tmp_path, cuda_available=True)
-        assert captured.get("model_kwargs", {}).get("device") == "cuda"
+        """When CUDA is available, the first embedding model is placed on 'cuda'."""
+        all_hf_calls, _ = self._run_build_index(tmp_path, cuda_available=True)
+        # The first HuggingFaceEmbeddings call must use the GPU for fast embedding.
+        assert all_hf_calls[0].get("model_kwargs", {}).get("device") == "cuda"
+
+    def test_cuda_path_uses_cpu_embeddings_for_index(self, tmp_path):
+        """When CUDA is available, the FAISS index is built with a CPU embeddings
+        wrapper to guarantee cross-platform (Mac/CPU) serialization compatibility."""
+        all_hf_calls, mock_faiss = self._run_build_index(tmp_path, cuda_available=True)
+        # A second HuggingFaceEmbeddings instance on 'cpu' must be created to
+        # wrap the index so that save_local() writes a CPU-compatible file.
+        assert len(all_hf_calls) == 2
+        assert all_hf_calls[1].get("model_kwargs", {}).get("device") == "cpu"
+        # FAISS.from_embeddings (not from_documents) is used in the CUDA path.
+        mock_faiss.from_embeddings.assert_called_once()
+        mock_faiss.from_documents.assert_not_called()
 
     def test_falls_back_to_cpu_when_cuda_unavailable(self, tmp_path):
         """When CUDA is unavailable, the embedding model falls back to 'cpu'."""
-        captured = self._run_build_index(tmp_path, cuda_available=False)
-        assert captured.get("model_kwargs", {}).get("device") == "cpu"
+        all_hf_calls, mock_faiss = self._run_build_index(tmp_path, cuda_available=False)
+        assert all_hf_calls[0].get("model_kwargs", {}).get("device") == "cpu"
+        # CPU path uses the standard FAISS.from_documents path.
+        mock_faiss.from_documents.assert_called_once()
+        mock_faiss.from_embeddings.assert_not_called()

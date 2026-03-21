@@ -7,6 +7,7 @@ uvicorn[standard]>=0.29,<1
 
 # LangChain ecosystem
 langchain>=1,<2
+langchain-classic>=1,<2
 langchain-community>=0.4,<1
 langchain-huggingface>=1,<2
 
@@ -15,6 +16,9 @@ sentence-transformers>=2.7,<4
 
 # FAISS — CPU build (no GPU required)
 faiss-cpu>=1.8,<2
+
+# BM25 sparse retriever (required by langchain-community BM25Retriever)
+rank_bm25>=0.2,<1
 
 # Ollama client
 ollama>=0.4,<1

@@ -11,8 +11,9 @@ on the consolidated module integration and the two new tools:
 
 from __future__ import annotations
 
+import asyncio
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -48,6 +49,15 @@ def _mock_httpx_response(json_data=None, text_data: str = "", status_code: int =
     else:
         resp.raise_for_status.return_value = None
     return resp
+
+
+def _mock_async_httpx_client(mock_response):
+    """Return a mock httpx.AsyncClient usable as an async context manager."""
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_response)
+    return mock_client
 
 
 # ---------------------------------------------------------------------------
@@ -173,11 +183,11 @@ class TestQueryMesosphericData:
             }
         }
 
-        with patch("lasp_mcp._latis_get", return_value=fake_data):
-            result = mod.query_mesospheric_data(
+        with patch("lasp_mcp._latis_get", new_callable=AsyncMock, return_value=fake_data):
+            result = asyncio.run(mod.query_mesospheric_data(
                 dataset_id="aim_cips_anc_na",
                 variable_constraints="time>=2022-305&time<2023-001",
-            )
+            ))
 
         assert result == fake_data
 
@@ -187,15 +197,15 @@ class TestQueryMesosphericData:
 
         captured: list[tuple] = []
 
-        def fake_latis_get(url, timeout):
+        async def fake_latis_get(url, timeout):
             captured.append((url, timeout))
             return {}
 
         with patch("lasp_mcp._latis_get", side_effect=fake_latis_get):
-            mod.query_mesospheric_data(
+            asyncio.run(mod.query_mesospheric_data(
                 dataset_id="aim_cips_anc_na",
                 variable_constraints="time>=2022-305&time<2023-001",
-            )
+            ))
 
         assert len(captured) == 1
         url, timeout = captured[0]
@@ -210,12 +220,12 @@ class TestQueryMesosphericData:
 
         captured: list[str] = []
 
-        def fake_latis_get(url, timeout):
+        async def fake_latis_get(url, timeout):
             captured.append(url)
             return {}
 
         with patch("lasp_mcp._latis_get", side_effect=fake_latis_get):
-            mod.query_mesospheric_data(dataset_id="aim_cips_anc_na")
+            asyncio.run(mod.query_mesospheric_data(dataset_id="aim_cips_anc_na"))
 
         assert "?" not in captured[0]
 
@@ -225,15 +235,15 @@ class TestQueryMesosphericData:
 
         captured: list[str] = []
 
-        def fake_latis_get(url, timeout):
+        async def fake_latis_get(url, timeout):
             captured.append(url)
             return {}
 
         with patch("lasp_mcp._latis_get", side_effect=fake_latis_get):
-            mod.query_mesospheric_data(
+            asyncio.run(mod.query_mesospheric_data(
                 dataset_id="aim_cips_anc_na",
                 output_format="csv",
-            )
+            ))
 
         assert ".csv" in captured[0]
 
@@ -243,12 +253,12 @@ class TestQueryMesosphericData:
 
         captured: list[str] = []
 
-        def fake_latis_get(url, timeout):
+        async def fake_latis_get(url, timeout):
             captured.append(url)
             return {}
 
         with patch("lasp_mcp._latis_get", side_effect=fake_latis_get):
-            mod.query_mesospheric_data(dataset_id="aim_cips_anc_na")
+            asyncio.run(mod.query_mesospheric_data(dataset_id="aim_cips_anc_na"))
 
         assert ".json" in captured[0]
 
@@ -262,13 +272,14 @@ class TestQueryMesosphericData:
 
         with patch(
             "lasp_mcp._latis_get",
+            new_callable=AsyncMock,
             side_effect=httpx.HTTPStatusError(
                 "404 Not Found",
                 request=MagicMock(),
                 response=mock_response,
             ),
         ):
-            result = mod.query_mesospheric_data(dataset_id="nonexistent_dataset")
+            result = asyncio.run(mod.query_mesospheric_data(dataset_id="nonexistent_dataset"))
 
         assert "error" in result
         assert "404" in result["error"]
@@ -283,16 +294,17 @@ class TestQueryMesosphericData:
 
         with patch(
             "lasp_mcp._latis_get",
+            new_callable=AsyncMock,
             side_effect=httpx.HTTPStatusError(
                 "400 Bad Request",
                 request=MagicMock(),
                 response=mock_response,
             ),
         ):
-            result = mod.query_mesospheric_data(
+            result = asyncio.run(mod.query_mesospheric_data(
                 dataset_id="aim_cips_anc_na",
                 variable_constraints="time>=2022-001",
-            )
+            ))
 
         assert "url" in result
 
@@ -302,9 +314,10 @@ class TestQueryMesosphericData:
 
         with patch(
             "lasp_mcp._latis_get",
+            new_callable=AsyncMock,
             side_effect=httpx.ConnectError("Connection refused"),
         ):
-            result = mod.query_mesospheric_data(dataset_id="aim_cips_anc_na")
+            result = asyncio.run(mod.query_mesospheric_data(dataset_id="aim_cips_anc_na"))
 
         assert "error" in result
         assert "failed" in result["error"].lower()
@@ -315,9 +328,10 @@ class TestQueryMesosphericData:
 
         with patch(
             "lasp_mcp._latis_get",
+            new_callable=AsyncMock,
             side_effect=httpx.TimeoutException("Timed out"),
         ):
-            result = mod.query_mesospheric_data(dataset_id="aim_cips_anc_na")
+            result = asyncio.run(mod.query_mesospheric_data(dataset_id="aim_cips_anc_na"))
 
         assert "url" in result
 
@@ -347,14 +361,14 @@ class TestHapiTimeSeriesStream:
             ],
         }
 
-        with patch("lasp_mcp._hapi_get", return_value=fake_data):
-            result = mod.hapi_time_series_stream(
+        with patch("lasp_mcp._hapi_get", new_callable=AsyncMock, return_value=fake_data):
+            result = asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi",
                 dataset="LISIRD3/composite_lya",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
                 parameters="Time,irradiance",
-            )
+            ))
 
         assert result == fake_data
 
@@ -364,18 +378,18 @@ class TestHapiTimeSeriesStream:
 
         captured: list[tuple] = []
 
-        def fake_hapi_get(url, params):
+        async def fake_hapi_get(url, params):
             captured.append((url, params))
             return {}
 
         with patch("lasp_mcp._hapi_get", side_effect=fake_hapi_get):
-            mod.hapi_time_series_stream(
+            asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi",
                 dataset="LISIRD3/composite_lya",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
                 parameters="Time,irradiance",
-            )
+            ))
 
         assert len(captured) == 1
         url, params = captured[0]
@@ -392,17 +406,17 @@ class TestHapiTimeSeriesStream:
 
         captured: list[str] = []
 
-        def fake_hapi_get(url, params):
+        async def fake_hapi_get(url, params):
             captured.append(url)
             return {}
 
         with patch("lasp_mcp._hapi_get", side_effect=fake_hapi_get):
-            mod.hapi_time_series_stream(
+            asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi/",
                 dataset="LISIRD3/composite_lya",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
-            )
+            ))
 
         assert captured[0] == "https://lasp.colorado.edu/lisird/hapi/data"
 
@@ -412,17 +426,17 @@ class TestHapiTimeSeriesStream:
 
         captured: list[dict] = []
 
-        def fake_hapi_get(url, params):
+        async def fake_hapi_get(url, params):
             captured.append(params)
             return {}
 
         with patch("lasp_mcp._hapi_get", side_effect=fake_hapi_get):
-            mod.hapi_time_series_stream(
+            asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://cdaweb.gsfc.nasa.gov/hapi",
                 dataset="AC_K0_SWE",
                 start="2020-06-01T00:00:00Z",
                 stop="2020-06-02T00:00:00Z",
-            )
+            ))
 
         assert "parameters" not in captured[0]
 
@@ -432,17 +446,17 @@ class TestHapiTimeSeriesStream:
 
         captured: list[dict] = []
 
-        def fake_hapi_get(url, params):
+        async def fake_hapi_get(url, params):
             captured.append(params)
             return {}
 
         with patch("lasp_mcp._hapi_get", side_effect=fake_hapi_get):
-            mod.hapi_time_series_stream(
+            asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi",
                 dataset="LISIRD3/composite_lya",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
-            )
+            ))
 
         assert captured[0]["format"] == "json"
 
@@ -452,18 +466,18 @@ class TestHapiTimeSeriesStream:
 
         captured: list[tuple] = []
 
-        def fake_hapi_get(url, params):
+        async def fake_hapi_get(url, params):
             captured.append((url, params))
             return {}
 
         with patch("lasp_mcp._hapi_get", side_effect=fake_hapi_get):
-            mod.hapi_time_series_stream(
+            asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://cdaweb.gsfc.nasa.gov/hapi",
                 dataset="AC_K0_SWE",
                 start="2020-06-01T00:00:00Z",
                 stop="2020-06-02T00:00:00Z",
                 parameters="Time,Np",
-            )
+            ))
 
         url, params = captured[0]
         assert url == "https://cdaweb.gsfc.nasa.gov/hapi/data"
@@ -479,18 +493,19 @@ class TestHapiTimeSeriesStream:
 
         with patch(
             "lasp_mcp._hapi_get",
+            new_callable=AsyncMock,
             side_effect=httpx.HTTPStatusError(
                 "404 Not Found",
                 request=MagicMock(),
                 response=mock_response,
             ),
         ):
-            result = mod.hapi_time_series_stream(
+            result = asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi",
                 dataset="nonexistent",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
-            )
+            ))
 
         assert "error" in result
         assert "404" in result["error"]
@@ -503,14 +518,15 @@ class TestHapiTimeSeriesStream:
 
         with patch(
             "lasp_mcp._hapi_get",
+            new_callable=AsyncMock,
             side_effect=httpx.ConnectError("Connection refused"),
         ):
-            result = mod.hapi_time_series_stream(
+            result = asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi",
                 dataset="LISIRD3/composite_lya",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
-            )
+            ))
 
         assert "error" in result
         assert "failed" in result["error"].lower()
@@ -523,20 +539,21 @@ class TestHapiTimeSeriesStream:
 
         with patch(
             "lasp_mcp._hapi_get",
+            new_callable=AsyncMock,
             side_effect=httpx.TimeoutException("Timed out"),
         ):
-            result = mod.hapi_time_series_stream(
+            result = asyncio.run(mod.hapi_time_series_stream(
                 server_url="https://lasp.colorado.edu/lisird/hapi",
                 dataset="LISIRD3/composite_lya",
                 start="2020-01-01T00:00:00Z",
                 stop="2020-01-31T23:59:59Z",
-            )
+            ))
 
         assert "error" in result
 
 
 # ---------------------------------------------------------------------------
-# _hapi_get (integration-style, mocking httpx.Client)
+# _hapi_get (integration-style, mocking httpx.AsyncClient)
 # ---------------------------------------------------------------------------
 
 
@@ -552,11 +569,8 @@ class TestHapiGet:
             "status": {"code": 1200, "message": "OK"},
             "data": [["2020-01-01T00:00:00.000Z", 0.00528]],
         }
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
         mock_response = _mock_httpx_response(json_data=fake_json)
-        mock_client.get.return_value = mock_response
+        mock_client = _mock_async_httpx_client(mock_response)
 
         endpoint = "https://lasp.colorado.edu/lisird/hapi/data"
         params = {
@@ -566,28 +580,25 @@ class TestHapiGet:
             "format": "json",
         }
 
-        with patch("lasp_mcp.httpx.Client", return_value=mock_client):
-            result = mod._hapi_get(endpoint, params)
+        with patch("lasp_mcp.httpx.AsyncClient", return_value=mock_client):
+            result = asyncio.run(mod._hapi_get(endpoint, params))
 
-        mock_client.get.assert_called_once_with(endpoint, params=params)
+        mock_client.get.assert_awaited_once_with(endpoint, params=params)
         assert result == fake_json
 
     def test_raises_on_http_error(self):
         _fresh_module()
         import lasp_mcp as mod
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
         mock_response = _mock_httpx_response(status_code=404, text_data="Not Found")
-        mock_client.get.return_value = mock_response
+        mock_client = _mock_async_httpx_client(mock_response)
 
-        with patch("lasp_mcp.httpx.Client", return_value=mock_client):
+        with patch("lasp_mcp.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(httpx.HTTPStatusError):
-                mod._hapi_get(
+                asyncio.run(mod._hapi_get(
                     "https://lasp.colorado.edu/lisird/hapi/data",
                     {"id": "bad_dataset", "time.min": "2020-01-01", "time.max": "2020-01-31", "format": "json"},
-                )
+                ))
 
 
 # ---------------------------------------------------------------------------
@@ -603,37 +614,31 @@ class TestLatisGetConsolidated:
         import lasp_mcp as mod
 
         fake_json = {"aim_cips_anc_na": {"data": []}}
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
         mock_response = _mock_httpx_response(json_data=fake_json)
-        mock_client.get.return_value = mock_response
+        mock_client = _mock_async_httpx_client(mock_response)
 
         test_url = (
             "https://lasp.colorado.edu/aim/latis/dap2/aim_cips_anc_na.json"
             "?time>=2022-305&time<2023-001"
         )
 
-        with patch("lasp_mcp.httpx.Client", return_value=mock_client):
-            result = mod._latis_get(test_url, 30.0)
+        with patch("lasp_mcp.httpx.AsyncClient", return_value=mock_client):
+            result = asyncio.run(mod._latis_get(test_url, 30.0))
 
-        mock_client.get.assert_called_once_with(test_url)
+        mock_client.get.assert_awaited_once_with(test_url)
         assert result == fake_json
 
     def test_uses_supplied_timeout(self):
         _fresh_module()
         import lasp_mcp as mod
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
         mock_response = _mock_httpx_response(json_data={})
-        mock_client.get.return_value = mock_response
+        mock_client = _mock_async_httpx_client(mock_response)
 
         custom_timeout = 60.0
 
-        with patch("lasp_mcp.httpx.Client", return_value=mock_client) as mock_cls:
-            mod._latis_get("https://example.com/data.json", custom_timeout)
+        with patch("lasp_mcp.httpx.AsyncClient", return_value=mock_client) as mock_cls:
+            asyncio.run(mod._latis_get("https://example.com/data.json", custom_timeout))
 
         mock_cls.assert_called_once_with(timeout=custom_timeout)
 
@@ -641,15 +646,12 @@ class TestLatisGetConsolidated:
         _fresh_module()
         import lasp_mcp as mod
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
         mock_response = _mock_httpx_response(status_code=500, text_data="Server Error")
-        mock_client.get.return_value = mock_response
+        mock_client = _mock_async_httpx_client(mock_response)
 
-        with patch("lasp_mcp.httpx.Client", return_value=mock_client):
+        with patch("lasp_mcp.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(httpx.HTTPStatusError):
-                mod._latis_get("https://example.com/bad.json", 30.0)
+                asyncio.run(mod._latis_get("https://example.com/bad.json", 30.0))
 
 
 # ---------------------------------------------------------------------------
@@ -665,12 +667,12 @@ class TestExistingToolsInConsolidatedModule:
         import lasp_mcp as mod
 
         fake_data = {"sorce_tsi_24hr": {"data": [[1577836800000, 1360.5]]}}
-        with patch("lasp_mcp._latis_get", return_value=fake_data):
-            result = mod.query_solar_irradiance(
+        with patch("lasp_mcp._latis_get", new_callable=AsyncMock, return_value=fake_data):
+            result = asyncio.run(mod.query_solar_irradiance(
                 dataset_id="sorce_tsi_24hr",
                 start_date="2020-01-01",
                 end_date="2020-01-31",
-            )
+            ))
         assert result == fake_data
 
     def test_list_lisird_datasets_calls_catalog(self):
@@ -679,12 +681,12 @@ class TestExistingToolsInConsolidatedModule:
 
         captured: list[str] = []
 
-        def fake_latis_get(url, timeout):
+        async def fake_latis_get(url, timeout):
             captured.append(url)
             return {}
 
         with patch("lasp_mcp._latis_get", side_effect=fake_latis_get):
-            mod.list_lisird_datasets()
+            asyncio.run(mod.list_lisird_datasets())
 
         assert captured[0].endswith("/catalog.json")
 
@@ -694,12 +696,12 @@ class TestExistingToolsInConsolidatedModule:
 
         captured: list = []
 
-        def fake_sdc_get(path, params):
+        async def fake_sdc_get(path, params):
             captured.append(path)
             return {}
 
         with patch("lasp_mcp._sdc_get", side_effect=fake_sdc_get):
-            mod.list_mms_files(sc_id="mms1")
+            asyncio.run(mod.list_mms_files(sc_id="mms1"))
 
         assert captured[0] == "file_info/science"
 
@@ -709,11 +711,11 @@ class TestExistingToolsInConsolidatedModule:
 
         captured: list = []
 
-        def fake_sdc_get(path, params):
+        async def fake_sdc_get(path, params):
             captured.append(path)
             return ""
 
         with patch("lasp_mcp._sdc_get", side_effect=fake_sdc_get):
-            mod.get_mms_file_urls(sc_id="mms1")
+            asyncio.run(mod.get_mms_file_urls(sc_id="mms1"))
 
         assert captured[0] == "file_names/science"
