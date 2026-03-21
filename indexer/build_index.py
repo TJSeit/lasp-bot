@@ -152,8 +152,30 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
     )
 
     # 4. Build and Save FAISS Index
-    logging.info("Building FAISS vector index (this may take a few minutes on your GPU)...")
-    vector_db = FAISS.from_documents(chunks, embeddings)
+    # When CUDA is available, embeddings are generated on the GPU for speed.
+    # However, the final FAISS index is always instantiated using the standard
+    # faiss-cpu library to guarantee cross-platform compatibility when the
+    # index folder is transferred to a Mac mini (or any CPU-only environment).
+    logging.info("Building FAISS vector index (this may take a few minutes)...")
+    if device == 'cuda':
+        logging.info(
+            "Generating embeddings on GPU; instantiating FAISS index with "
+            "CPU-compatible serialization for Mac/CPU portability..."
+        )
+        texts = [chunk.page_content for chunk in chunks]
+        metadatas = [chunk.metadata for chunk in chunks]
+        embedding_vectors = embeddings.embed_documents(texts)
+        # Wrap pre-computed vectors with a CPU embeddings object so that the
+        # saved index carries no GPU-specific structures.
+        cpu_embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True},
+        )
+        text_embeddings = list(zip(texts, embedding_vectors))
+        vector_db = FAISS.from_embeddings(text_embeddings, cpu_embeddings, metadatas=metadatas)
+    else:
+        vector_db = FAISS.from_documents(chunks, embeddings)
     
     os.makedirs(output_dir, exist_ok=True)
     vector_db.save_local(output_dir)

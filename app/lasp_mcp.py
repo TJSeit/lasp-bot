@@ -108,10 +108,10 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 
-def _latis_get(url: str, timeout: float) -> Any:
+async def _latis_get(url: str, timeout: float) -> Any:
     """Perform a GET request against a LaTiS DAP2 API and return parsed JSON."""
-    with httpx.Client(timeout=timeout) as client:
-        response = client.get(url)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(url)
     response.raise_for_status()
     return response.json()
 
@@ -191,11 +191,11 @@ def _build_sdc_params(
     return params
 
 
-def _sdc_get(path: str, params: dict[str, str]) -> Any:
+async def _sdc_get(path: str, params: dict[str, str]) -> Any:
     """Perform a GET request against the MMS SDC API and return parsed JSON."""
     url = f"{MMS_SDC_BASE_URL}/{path}"
-    with httpx.Client(timeout=MMS_SDC_TIMEOUT) as client:
-        response = client.get(url, params=params)
+    async with httpx.AsyncClient(timeout=MMS_SDC_TIMEOUT) as client:
+        response = await client.get(url, params=params)
     response.raise_for_status()
     return response.json()
 
@@ -205,10 +205,10 @@ def _sdc_get(path: str, params: dict[str, str]) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _hapi_get(url: str, params: dict[str, str]) -> Any:
+async def _hapi_get(url: str, params: dict[str, str]) -> Any:
     """Perform a GET request against a HAPI server and return parsed JSON."""
-    with httpx.Client(timeout=HAPI_TIMEOUT) as client:
-        response = client.get(url, params=params)
+    async with httpx.AsyncClient(timeout=HAPI_TIMEOUT) as client:
+        response = await client.get(url, params=params)
     response.raise_for_status()
     return response.json()
 
@@ -219,7 +219,7 @@ def _hapi_get(url: str, params: dict[str, str]) -> Any:
 
 
 @mcp.tool()
-def query_solar_irradiance(
+async def query_solar_irradiance(
     dataset_id: Annotated[
         str,
         Field(
@@ -293,7 +293,7 @@ def query_solar_irradiance(
     """
     url = _build_lisird_url(dataset_id, output_format, variables, start_date, end_date)
     try:
-        return _latis_get(url, LISIRD_TIMEOUT)
+        return await _latis_get(url, LISIRD_TIMEOUT)
     except httpx.HTTPStatusError as exc:
         return {
             "error": f"LISIRD returned HTTP {exc.response.status_code}",
@@ -305,7 +305,7 @@ def query_solar_irradiance(
 
 
 @mcp.tool()
-def list_lisird_datasets() -> dict[str, Any]:
+async def list_lisird_datasets() -> dict[str, Any]:
     """List all solar datasets available through LISIRD.
 
     Queries the LaTiS catalog endpoint and returns metadata for every dataset
@@ -318,7 +318,7 @@ def list_lisird_datasets() -> dict[str, Any]:
     """
     url = f"{LISIRD_BASE_URL}/catalog.json"
     try:
-        return _latis_get(url, LISIRD_TIMEOUT)
+        return await _latis_get(url, LISIRD_TIMEOUT)
     except httpx.HTTPStatusError as exc:
         return {
             "error": f"LISIRD returned HTTP {exc.response.status_code}",
@@ -334,7 +334,7 @@ def list_lisird_datasets() -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_mms_files(
+async def list_mms_files(
     sc_id: Annotated[
         str | None,
         Field(
@@ -422,7 +422,7 @@ def list_mms_files(
         sc_id, instrument_id, data_rate_mode, data_level, start_date, end_date, version
     )
     try:
-        return _sdc_get("file_info/science", params)
+        return await _sdc_get("file_info/science", params)
     except httpx.HTTPStatusError as exc:
         return {
             "error": f"MMS SDC returned HTTP {exc.response.status_code}",
@@ -433,7 +433,7 @@ def list_mms_files(
 
 
 @mcp.tool()
-def get_mms_file_urls(
+async def get_mms_file_urls(
     sc_id: Annotated[
         str | None,
         Field(
@@ -520,7 +520,7 @@ def get_mms_file_urls(
         sc_id, instrument_id, data_rate_mode, data_level, start_date, end_date, version
     )
     try:
-        data = _sdc_get("file_names/science", params)
+        data = await _sdc_get("file_names/science", params)
     except httpx.HTTPStatusError as exc:
         return {
             "error": f"MMS SDC returned HTTP {exc.response.status_code}",
@@ -547,7 +547,7 @@ def get_mms_file_urls(
 
 
 @mcp.tool()
-def query_mesospheric_data(
+async def query_mesospheric_data(
     dataset_id: Annotated[
         str,
         Field(
@@ -611,7 +611,7 @@ def query_mesospheric_data(
     """
     url = _build_aim_url(dataset_id, output_format, variable_constraints)
     try:
-        return _latis_get(url, AIM_TIMEOUT)
+        return await _latis_get(url, AIM_TIMEOUT)
     except httpx.HTTPStatusError as exc:
         return {
             "error": f"AIM CIPS returned HTTP {exc.response.status_code}",
@@ -628,7 +628,7 @@ def query_mesospheric_data(
 
 
 @mcp.tool()
-def hapi_time_series_stream(
+async def hapi_time_series_stream(
     server_url: Annotated[
         str,
         Field(
@@ -726,7 +726,7 @@ def hapi_time_series_stream(
         params["parameters"] = parameters
 
     try:
-        return _hapi_get(endpoint, params)
+        return await _hapi_get(endpoint, params)
     except httpx.HTTPStatusError as exc:
         return {
             "error": f"HAPI server returned HTTP {exc.response.status_code}",

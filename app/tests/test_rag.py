@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import rag
 from fastapi.testclient import TestClient
+from langchain_core.documents import Document
 
 
 # ---------------------------------------------------------------------------
@@ -39,21 +40,59 @@ def _make_fake_llm_response(text: str):
 
 
 class TestBuildRagChain:
-    """build_rag_chain loads the FAISS index from a local directory."""
+    """build_rag_chain loads the FAISS index and builds a hybrid retriever."""
+
+    def _make_mock_vectorstore(self, num_docs: int = 2):
+        """Return a mock vectorstore with a populated docstore._dict.
+
+        Uses real LangChain Document objects so that BM25Retriever.from_documents()
+        can process them without hitting Pydantic validation errors on the mock id.
+        """
+        mock_vectorstore = MagicMock()
+        real_docs = [
+            Document(page_content=f"doc {i}", metadata={"source": f"doc{i}.pdf", "page": i})
+            for i in range(num_docs)
+        ]
+        mock_vectorstore.docstore._dict = {str(i): d for i, d in enumerate(real_docs)}
+        return mock_vectorstore
 
     def test_loads_vectorstore_from_local_dir(self):
-        mock_vectorstore = MagicMock()
-        mock_retriever = MagicMock()
-        mock_vectorstore.as_retriever.return_value = mock_retriever
+        mock_vectorstore = self._make_mock_vectorstore()
+        mock_ensemble = MagicMock()
 
         with patch("rag._load_vectorstore", return_value=mock_vectorstore) as mock_load, \
+             patch("rag.BM25Retriever") as MockBM25, \
+             patch("rag.EnsembleRetriever", return_value=mock_ensemble) as MockEnsemble, \
              patch("rag.ollama.Client") as MockClient:
             retriever, llm_client = rag.build_rag_chain()
 
         mock_load.assert_called_once_with(rag.FAISS_INDEX_DIR, rag.EMBEDDING_MODEL)
         mock_vectorstore.as_retriever.assert_called_once_with(search_kwargs={"k": rag.TOP_K})
+        MockBM25.from_documents.assert_called_once()
+        MockEnsemble.assert_called_once()
         MockClient.assert_called_once_with(host=rag.OLLAMA_BASE_URL)
-        assert retriever is mock_retriever
+        assert retriever is mock_ensemble
+
+    def test_hybrid_retriever_combines_faiss_and_bm25(self):
+        mock_vectorstore = self._make_mock_vectorstore()
+        mock_ensemble = MagicMock()
+
+        with patch("rag._load_vectorstore", return_value=mock_vectorstore), \
+             patch("rag.BM25Retriever") as MockBM25, \
+             patch("rag.EnsembleRetriever", return_value=mock_ensemble) as MockEnsemble, \
+             patch("rag.ollama.Client"):
+            retriever, _ = rag.build_rag_chain()
+
+        # EnsembleRetriever should be constructed with both retrievers and equal weights.
+        call_kwargs = MockEnsemble.call_args.kwargs
+        assert "retrievers" in call_kwargs
+        assert len(call_kwargs["retrievers"]) == 2
+        assert call_kwargs["weights"] == [0.5, 0.5]
+        # BM25Retriever.from_documents should receive the stored docs.
+        bm25_call = MockBM25.from_documents.call_args
+        docs_passed = bm25_call.args[0] if bm25_call.args else bm25_call.kwargs.get("documents")
+        assert len(docs_passed) == 2
+
 
 
 class TestAnswerQuery:
@@ -182,6 +221,75 @@ class TestAnswerQuery:
         # Should have exactly: system + user
         assert len(messages) == 2
         assert result["answer"] == "Answer."
+
+
+# ---------------------------------------------------------------------------
+# _is_conversational router tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsConversational:
+    """_is_conversational identifies casual greetings to skip retrieval."""
+
+    def test_hi_is_conversational(self):
+        assert rag._is_conversational("hi") is True
+
+    def test_hello_is_conversational(self):
+        assert rag._is_conversational("Hello!") is True
+
+    def test_thanks_is_conversational(self):
+        assert rag._is_conversational("thanks") is True
+
+    def test_technical_question_not_conversational(self):
+        assert rag._is_conversational("What is the SWEA instrument?") is False
+
+    def test_long_greeting_not_conversational(self):
+        # More than _CONVERSATIONAL_MAX_WORDS words → treated as a real question.
+        long = "Hello can you please tell me everything about MAVEN"
+        assert rag._is_conversational(long) is False
+
+    def test_empty_string_not_conversational(self):
+        assert rag._is_conversational("") is False
+
+    def test_acronym_query_not_conversational(self):
+        assert rag._is_conversational("NGIMS data format") is False
+
+
+class TestAnswerQueryRouter:
+    """answer_query bypasses retrieval for conversational questions."""
+
+    def test_greeting_bypasses_retriever(self):
+        retriever = MagicMock()
+        llm_client = MagicMock()
+        llm_client.chat.return_value = _make_fake_llm_response("Hello there!")
+
+        result = rag.answer_query(retriever, llm_client, "hi")
+
+        # The retriever must NOT be called for a conversational message.
+        retriever.invoke.assert_not_called()
+        assert result["answer"] == "Hello there!"
+        assert result["sources"] == []
+
+    def test_greeting_returns_empty_sources(self):
+        retriever = MagicMock()
+        llm_client = MagicMock()
+        llm_client.chat.return_value = _make_fake_llm_response("I'm doing well!")
+
+        result = rag.answer_query(retriever, llm_client, "how are you")
+        assert result["sources"] == []
+
+    def test_technical_question_still_uses_retriever(self):
+        docs = [_make_fake_doc("SWEA measures solar wind electrons.")]
+        retriever = MagicMock()
+        retriever.invoke.return_value = docs
+
+        llm_client = MagicMock()
+        llm_client.chat.return_value = _make_fake_llm_response("SWEA answer.")
+
+        result = rag.answer_query(retriever, llm_client, "What does SWEA measure?")
+
+        retriever.invoke.assert_called_once()
+        assert len(result["sources"]) == 1
 
 
 # ---------------------------------------------------------------------------
