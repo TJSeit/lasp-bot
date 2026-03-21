@@ -75,10 +75,13 @@ cp .env.example .env
 | `CHUNK_OVERLAP` | Chunk overlap for indexer (default: `64`) |
 | `DISCORD_TOKEN` | Discord bot token — required for `discord_bot.py` |
 | `DISCORD_COMMAND_PREFIX` | Command prefix for Discord bot (default: `!`) |
-| `MMS_SDC_BASE_URL` | MMS SDC API base URL (default: `https://lasp.colorado.edu/mms/sdc/public/files/api/v1`) |
-| `MMS_SDC_TIMEOUT` | HTTP timeout for MMS SDC requests in seconds (default: `30`) |
 | `LISIRD_BASE_URL` | LaTiS DAP2 API base URL (default: `https://lasp.colorado.edu/lisird/latis/dap2`) |
 | `LISIRD_TIMEOUT` | HTTP timeout for LISIRD requests in seconds (default: `30`) |
+| `MMS_SDC_BASE_URL` | MMS SDC API base URL (default: `https://lasp.colorado.edu/mms/sdc/public/files/api/v1`) |
+| `MMS_SDC_TIMEOUT` | HTTP timeout for MMS SDC requests in seconds (default: `30`) |
+| `AIM_BASE_URL` | AIM CIPS LaTiS DAP2 API base URL (default: `https://lasp.colorado.edu/aim/latis/dap2`) |
+| `AIM_TIMEOUT` | HTTP timeout for AIM CIPS requests in seconds (default: `30`) |
+| `HAPI_TIMEOUT` | HTTP timeout for HAPI server requests in seconds (default: `30`) |
 
 ### 3 — Build the FAISS index (local, GPU)
 
@@ -220,47 +223,52 @@ pytest tests/ -v
 
 ---
 
-## LISIRD MCP Tool
+## LASP MCP Server
 
-`app/lisird_mcp.py` is a standalone **Model Context Protocol (MCP)** server
-that exposes two tools for querying solar irradiance and space weather datasets
-through the [LASP Interactive Solar IRradiance Datacenter (LISIRD)](https://lasp.colorado.edu/lisird/)
-via the **LaTiS DAP2 API** — the data access library underlying both LISIRD and
-the Space Weather Data Portal. It provides access to 130+ solar datasets from
-LASP, NASA, NOAA, and NSO through a "Functional Data Model" that allows
-SQL-like querying directly in the URL.
+`app/lasp_mcp.py` is a standalone **Model Context Protocol (MCP)** server that
+exposes **six tools** for querying LASP data APIs. Combining all tools in a
+single server means any MCP-compatible client only needs one connection to access
+solar irradiance data, magnetospheric science files, mesospheric cloud
+observations, and standardised heliophysics time-series.
+
+### Running the MCP server
+
+```bash
+cd app
+pip install -r requirements.txt
+python lasp_mcp.py
+```
+
+The server uses the MCP stdio transport and can be connected to any
+MCP-compatible client (e.g. Claude Desktop, MCP Inspector).
+
+---
+
+### LISIRD — solar irradiance & space weather
+
+Access to 130+ solar datasets from LASP, NASA, NOAA, and NSO through the
+[LASP Interactive Solar IRradiance Datacenter (LISIRD)](https://lasp.colorado.edu/lisird/)
+via the **LaTiS DAP2 API**.
 
 | Tool | Description |
 |------|-------------|
-| `list_lisird_datasets` | List all datasets available through LISIRD (returns identifiers, titles, and descriptions) |
-| `query_solar_irradiance` | Query measurements from a specific dataset with optional time-range filtering and variable projection |
+| `list_lisird_datasets` | List all available datasets (identifiers, titles, descriptions) |
+| `query_solar_irradiance` | Query measurements with optional time-range filtering and variable projection |
 
-### `query_solar_irradiance` parameters
+#### `query_solar_irradiance` parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `dataset_id` | *(required)* | LaTiS dataset identifier, e.g. `sorce_tsi_24hr`. Use `list_lisird_datasets` to browse all identifiers. |
+| `dataset_id` | *(required)* | LaTiS dataset identifier, e.g. `sorce_tsi_24hr`. Use `list_lisird_datasets` to browse. |
 | `start_date` | `None` | Start of the time range (inclusive) — ISO 8601 date or timestamp, e.g. `2003-01-01` |
 | `end_date` | `None` | End of the time range (inclusive) — ISO 8601 date or timestamp, e.g. `2003-12-31` |
 | `variables` | `None` | Comma-separated variable projection, e.g. `time,tsi`. Leave blank to return all variables. |
 | `output_format` | `json` | Response format: `json` or `csv` |
 
-### Running the LISIRD MCP server
-
-```bash
-cd app
-pip install -r requirements.txt
-python lisird_mcp.py
-```
-
-The server speaks the MCP stdio transport by default and can be connected to
-any MCP-compatible client (e.g. Claude Desktop, MCP Inspector).
-
-### Example usage
+#### Example
 
 ```python
-# Fetch daily total solar irradiance from SORCE for January 2020,
-# returning only the time and tsi variables as JSON
+# Fetch daily total solar irradiance from SORCE for January 2020
 query_solar_irradiance(
     dataset_id="sorce_tsi_24hr",
     start_date="2020-01-01",
@@ -270,7 +278,7 @@ query_solar_irradiance(
 # URL: .../sorce_tsi_24hr.json?time,tsi&time>=2020-01-01&time<=2020-01-31
 ```
 
-### Environment variables
+#### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -279,16 +287,15 @@ query_solar_irradiance(
 
 ---
 
-## MMS SDC MCP Tool
+### MMS SDC — magnetospheric science files
 
-`app/mms_sdc_mcp.py` is a standalone **Model Context Protocol (MCP)** server
-that exposes two tools for querying the
-[MMS Science Data Center](https://lasp.colorado.edu/mms/sdc/public/) (SDC)
-public REST API.
+Access to the [MMS Science Data Center](https://lasp.colorado.edu/mms/sdc/public/)
+public REST API for discovering and downloading
+[Magnetospheric Multiscale (MMS)](https://lasp.colorado.edu/mms/) science data.
 
 | Tool | Description |
 |------|-------------|
-| `list_mms_files` | Query available MMS science data files (returns metadata) |
+| `list_mms_files` | Query available science data files (returns metadata) |
 | `get_mms_file_urls` | Retrieve HTTPS download URLs for matching files |
 
 Both tools accept the same filter parameters:
@@ -303,23 +310,121 @@ Both tools accept the same filter parameters:
 | `end_date` | `YYYY-MM-DD` | End of time range |
 | `version` | e.g. `3.3.0` | File version (optional) |
 
-### Running the MCP server
+#### Example
 
-```bash
-cd app
-pip install -r requirements.txt
-python mms_sdc_mcp.py
+```python
+# List survey-rate FGM level-2 files for MMS1 in March 2016
+list_mms_files(
+    sc_id="mms1",
+    instrument_id="fgm",
+    data_rate_mode="srvy",
+    data_level="l2",
+    start_date="2016-03-01",
+    end_date="2016-03-31",
+)
 ```
 
-The server speaks the MCP stdio transport by default and can be connected to
-any MCP-compatible client (e.g. Claude Desktop, MCP Inspector).
-
-### Environment variables
+#### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MMS_SDC_BASE_URL` | `https://lasp.colorado.edu/mms/sdc/public/files/api/v1` | MMS SDC API base URL |
 | `MMS_SDC_TIMEOUT` | `30` | HTTP request timeout in seconds |
+
+---
+
+### AIM CIPS — mesospheric noctilucent clouds
+
+Access to the [Aeronomy of Ice in the Mesosphere (AIM)](https://lasp.colorado.edu/aim/)
+mission's **Cloud Imaging and Particle Size (CIPS)** datasets via the AIM-specific
+LaTiS DAP2 instance. CIPS monitors Earth's noctilucent clouds (NLCs) and uses a
+day-of-year (`YYYY-DDD`) time format in its constraint expressions.
+
+| Tool | Description |
+|------|-------------|
+| `query_mesospheric_data` | Query CIPS datasets with constraint-based variable and time filtering |
+
+#### `query_mesospheric_data` parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dataset_id` | *(required)* | AIM CIPS LaTiS dataset identifier, e.g. `aim_cips_anc_na`. Browse the catalog at `https://lasp.colorado.edu/aim/latis/dap2/catalog.json`. |
+| `variable_constraints` | `None` | Raw LaTiS constraint expression appended as the URL query string. Supports variable projection and time slices. Leave blank to retrieve the full dataset. |
+| `output_format` | `json` | Response format: `json` or `csv` |
+
+#### Example
+
+```python
+# Retrieve CIPS Northern-hemisphere data for a date range (day-of-year format)
+query_mesospheric_data(
+    dataset_id="aim_cips_anc_na",
+    variable_constraints="time>=2022-305&time<2023-001",
+)
+
+# Project specific variables alongside a time constraint
+query_mesospheric_data(
+    dataset_id="aim_cips_anc_na",
+    variable_constraints="time,albedo&time>=2022-001&time<2022-100",
+)
+```
+
+#### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AIM_BASE_URL` | `https://lasp.colorado.edu/aim/latis/dap2` | AIM CIPS LaTiS DAP2 API base URL |
+| `AIM_TIMEOUT` | `30` | HTTP request timeout in seconds |
+
+---
+
+### HAPI — standardised heliophysics time-series
+
+The [Heliophysics Application Programmer's Interface (HAPI)](https://hapi-server.org/)
+is a cross-agency standard for streaming time-series space-physics data. A single
+tool call works against **any** HAPI-compliant node — LASP/LISIRD, NASA Goddard
+CDAWeb, ESA AMDA, and more.
+
+| Tool | Description |
+|------|-------------|
+| `hapi_time_series_stream` | Fetch time-series data from any HAPI-compliant server |
+
+#### `hapi_time_series_stream` parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `server_url` | *(required)* | Base URL of the HAPI server (without trailing slash), e.g. `https://lasp.colorado.edu/lisird/hapi` |
+| `dataset` | *(required)* | Dataset (catalog entry) ID on the target server, e.g. `LISIRD3/composite_lya` |
+| `start` | *(required)* | Start of the requested time range in ISO 8601 format, e.g. `2020-01-01T00:00:00Z` |
+| `stop` | *(required)* | End of the requested time range (exclusive) in ISO 8601 format |
+| `parameters` | `None` | Comma-separated parameter names to include. Leave blank to return all parameters. |
+
+#### Example
+
+```python
+# Fetch composite Lyman-alpha from LASP LISIRD HAPI
+hapi_time_series_stream(
+    server_url="https://lasp.colorado.edu/lisird/hapi",
+    dataset="LISIRD3/composite_lya",
+    start="2020-01-01T00:00:00Z",
+    stop="2020-01-31T23:59:59Z",
+    parameters="Time,irradiance",
+)
+
+# Fetch solar-wind data from NASA Goddard CDAWeb using the same tool
+hapi_time_series_stream(
+    server_url="https://cdaweb.gsfc.nasa.gov/hapi",
+    dataset="AC_K0_SWE",
+    start="2020-06-01T00:00:00Z",
+    stop="2020-06-02T00:00:00Z",
+    parameters="Time,Np",
+)
+```
+
+#### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HAPI_TIMEOUT` | `30` | HTTP request timeout in seconds (server URL is supplied per call) |
 
 ---
 
@@ -334,15 +439,13 @@ lasp-bot/
 │   ├── main.py          # FastAPI application
 │   ├── rag.py           # RAG pipeline (local FAISS + Ollama)
 │   ├── discord_bot.py   # Discord bot (!ask / !lasp commands)
-│   ├── mms_sdc_mcp.py   # MCP server: MMS SDC query tools
-│   ├── lisird_mcp.py    # MCP server: LISIRD solar irradiance tools
+│   ├── lasp_mcp.py      # MCP server: all LASP data API tools
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── tests/
 │       ├── test_rag.py
 │       ├── test_discord_bot.py
-│       ├── test_mms_sdc_mcp.py
-│       └── test_lisird_mcp.py
+│       └── test_lasp_mcp.py
 ├── .env.example
 └── README.md
 ```
