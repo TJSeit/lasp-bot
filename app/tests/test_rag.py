@@ -140,6 +140,49 @@ class TestAnswerQuery:
         assert result["sources"][0]["page"] == ""
         assert result["sources"][0]["source_url"] == ""
 
+    def test_history_inserted_before_current_user_message(self):
+        docs = [_make_fake_doc("Some context.")]
+        retriever = MagicMock()
+        retriever.invoke.return_value = docs
+
+        llm_client = MagicMock()
+        llm_client.chat.return_value = _make_fake_llm_response("Follow-up answer.")
+
+        history = [
+            {"role": "user", "content": "Previous question?"},
+            {"role": "assistant", "content": "Previous answer."},
+        ]
+
+        rag.answer_query(retriever, llm_client, "Follow-up question?", history=history)
+
+        call_kwargs = llm_client.chat.call_args
+        messages = call_kwargs.kwargs["messages"]
+        roles = [m["role"] for m in messages]
+        assert roles[0] == "system"
+        assert roles[1] == "user"      # previous question
+        assert roles[2] == "assistant"  # previous answer
+        assert roles[3] == "user"      # current question
+        assert "Previous question?" in messages[1]["content"]
+        assert "Previous answer." in messages[2]["content"]
+        assert "Follow-up question?" in messages[3]["content"]
+
+    def test_no_history_does_not_break(self):
+        docs = [_make_fake_doc("Some context.")]
+        retriever = MagicMock()
+        retriever.invoke.return_value = docs
+
+        llm_client = MagicMock()
+        llm_client.chat.return_value = _make_fake_llm_response("Answer.")
+
+        # history=None (default) should still work without errors.
+        result = rag.answer_query(retriever, llm_client, "A question?")
+
+        call_kwargs = llm_client.chat.call_args
+        messages = call_kwargs.kwargs["messages"]
+        # Should have exactly: system + user
+        assert len(messages) == 2
+        assert result["answer"] == "Answer."
+
 
 # ---------------------------------------------------------------------------
 # FastAPI endpoint tests
@@ -227,3 +270,53 @@ class TestQueryEndpoint:
             with TestClient(app_module.app, raise_server_exceptions=False) as client:
                 resp = client.post("/query", json={"question": "test?"})
         assert resp.status_code == 500
+
+    def test_query_with_history_passes_history_to_rag(self, app_client):
+        client, _, fake_llm = app_client
+        history = [
+            {"role": "user", "content": "What is LASP?"},
+            {"role": "assistant", "content": "LASP is a research lab."},
+        ]
+        resp = client.post(
+            "/query",
+            json={"question": "Where is it located?", "history": history},
+        )
+        assert resp.status_code == 200
+        # Verify the LLM was called with the history messages included.
+        call_kwargs = fake_llm.chat.call_args
+        messages = call_kwargs.kwargs["messages"]
+        roles = [m["role"] for m in messages]
+        # system + previous user + previous assistant + current user
+        assert roles == ["system", "user", "assistant", "user"]
+
+    def test_query_without_history_defaults_to_empty(self, app_client):
+        client, _, fake_llm = app_client
+        resp = client.post("/query", json={"question": "Where is LASP?"})
+        assert resp.status_code == 200
+        call_kwargs = fake_llm.chat.call_args
+        messages = call_kwargs.kwargs["messages"]
+        # system + current user only
+        assert len(messages) == 2
+
+    def test_invalid_role_in_history_rejected(self, app_client):
+        client, _, _ = app_client
+        resp = client.post(
+            "/query",
+            json={
+                "question": "test?",
+                "history": [{"role": "system", "content": "hack"}],
+            },
+        )
+        # "system" is not a valid role; Pydantic should reject it.
+        assert resp.status_code == 422
+
+    def test_empty_content_in_history_rejected(self, app_client):
+        client, _, _ = app_client
+        resp = client.post(
+            "/query",
+            json={
+                "question": "test?",
+                "history": [{"role": "user", "content": ""}],
+            },
+        )
+        assert resp.status_code == 422

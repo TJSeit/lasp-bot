@@ -29,8 +29,16 @@ DISCORD_COMMAND_PREFIX: str = os.getenv("DISCORD_COMMAND_PREFIX", "!")
 # Discord messages are capped at 2 000 characters; leave a small safety margin.
 DISCORD_MAX_MESSAGE_LENGTH = 1900
 
+# Maximum number of conversation turns (user + assistant pairs) to retain per channel.
+MAX_HISTORY_TURNS = 10
+# Each turn consists of one user message and one assistant message.
+MAX_HISTORY_MESSAGES = MAX_HISTORY_TURNS * 2
+
 # Shared RAG state initialised once in on_ready.
 _rag_state: dict = {}
+
+# Per-channel conversation history, keyed by channel ID.
+_conversation_history: dict[int, list[dict]] = {}
 
 intents = discord.Intents.default()
 intents.message_content = True  # Required to read message text.
@@ -58,12 +66,18 @@ async def ask(ctx: commands.Context, *, question: str) -> None:
     Usage:
         !ask What missions does LASP operate?
         !lasp What is the MAVEN mission?
+
+    Conversation history is maintained per channel so you can ask follow-up
+    questions without repeating context.
     """
     if not _rag_state.get("retriever"):
         await ctx.send(
             "❌ The RAG chain is not ready yet. Please try again in a moment."
         )
         return
+
+    channel_id = ctx.channel.id
+    history = _conversation_history.get(channel_id, [])
 
     async with ctx.typing():
         try:
@@ -72,6 +86,7 @@ async def ask(ctx: commands.Context, *, question: str) -> None:
                 _rag_state["retriever"],
                 _rag_state["llm_client"],
                 question,
+                history,
             )
         except Exception as exc:
             await ctx.send(f"❌ An error occurred while processing your question: {exc}")
@@ -79,6 +94,16 @@ async def ask(ctx: commands.Context, *, question: str) -> None:
 
     answer = result["answer"]
     sources = result.get("sources", [])
+
+    # Update the per-channel history with this exchange.
+    updated_history = history + [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": answer},
+    ]
+    # Trim to the most recent MAX_HISTORY_TURNS exchanges (each = 2 messages).
+    if len(updated_history) > MAX_HISTORY_MESSAGES:
+        updated_history = updated_history[-MAX_HISTORY_MESSAGES:]
+    _conversation_history[channel_id] = updated_history
 
     response = f"**Answer:**\n{answer}"
 
