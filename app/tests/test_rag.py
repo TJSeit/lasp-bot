@@ -43,17 +43,19 @@ class TestBuildRagChain:
     """build_rag_chain loads the FAISS index and builds a hybrid retriever."""
 
     def _make_mock_vectorstore(self, num_docs: int = 2):
-        """Return a mock vectorstore with a populated docstore._dict.
+        """Return a mock vectorstore with documents accessible via the public API.
 
-        Uses real LangChain Document objects so that BM25Retriever.from_documents()
-        can process them without hitting Pydantic validation errors on the mock id.
+        Uses real LangChain Document objects and populates index_to_docstore_id
+        so that the public vectorstore.docstore.search() path is exercised.
         """
         mock_vectorstore = MagicMock()
         real_docs = [
             Document(page_content=f"doc {i}", metadata={"source": f"doc{i}.pdf", "page": i})
             for i in range(num_docs)
         ]
-        mock_vectorstore.docstore._dict = {str(i): d for i, d in enumerate(real_docs)}
+        doc_id_map = {i: str(i) for i in range(num_docs)}
+        mock_vectorstore.index_to_docstore_id = doc_id_map
+        mock_vectorstore.docstore.search.side_effect = lambda doc_id: real_docs[int(doc_id)]
         return mock_vectorstore
 
     def test_loads_vectorstore_from_local_dir(self):

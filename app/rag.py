@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 
 load_dotenv()
@@ -112,8 +113,11 @@ def build_rag_chain() -> tuple[Any, ollama.Client]:
     faiss_retriever = vectorstore.as_retriever(search_kwargs={"k": TOP_K})
 
     # Sparse BM25 retriever built from the documents already stored in the
-    # FAISS docstore (no extra disk reads required).
-    docs = list(vectorstore.docstore._dict.values())
+    # FAISS vectorstore (no extra disk reads required).
+    doc_ids = list(vectorstore.index_to_docstore_id.values())
+    docs = [vectorstore.docstore.search(doc_id) for doc_id in doc_ids]
+    # Filter to real Document objects (search() may return None on a miss).
+    docs = [d for d in docs if isinstance(d, Document)]
     bm25_retriever = BM25Retriever.from_documents(docs, k=TOP_K)
 
     # Hybrid retriever: equal weight to semantic and keyword search.
