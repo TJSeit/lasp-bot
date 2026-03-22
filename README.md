@@ -1,5 +1,9 @@
 # LASP Bot — Local RAG Application
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7c1cc5f0-2df9-48ec-b50e-c2f5fe8b307f" alt="lasp-bot logo" width="300"/>
+</p>
+
 A retrieval-augmented generation (RAG) chatbot that answers questions about the
 **Laboratory for Atmospheric and Space Physics (LASP)** documentation.
 
