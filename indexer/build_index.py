@@ -133,7 +133,7 @@ def build_index(corpus_dir: str, output_dir: str = "lasp_faiss_index") -> None:
     chunks = text_splitter.split_documents(docs)
     logging.info(f"Created {len(chunks)} text chunks.")
 
-    # 3. Initialise embeddings (GPU if available, otherwise CPU).
+    # 3. Initialize embeddings (GPU if available, otherwise CPU).
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cpu":
         logging.warning(
