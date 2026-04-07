@@ -252,7 +252,7 @@ class TestCrawlFromSitemap:
         assert queued == 2
         assert builder.scrape_web_and_pds.call_count == 2
 
-    def test_excludes_people_urls(self, tmp_path):
+    def test_includes_people_urls(self, tmp_path):
         builder = _make_builder(tmp_path)
         builder.fetch_sitemap_urls = MagicMock(
             return_value=[
@@ -267,9 +267,10 @@ class TestCrawlFromSitemap:
                 "https://lasp.colorado.edu/sitemap.xml"
             )
 
-        assert queued == 1
-        scraped_url = builder.scrape_web_and_pds.call_args[0][0]
-        assert "missions/maven" in scraped_url
+        assert queued == 2
+        scraped_urls = [call[0][0] for call in builder.scrape_web_and_pds.call_args_list]
+        assert any("missions/maven" in u for u in scraped_urls)
+        assert any("people/john-doe" in u for u in scraped_urls)
 
     def test_excludes_foreign_domain_urls(self, tmp_path):
         builder = _make_builder(tmp_path)

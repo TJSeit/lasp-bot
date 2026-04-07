@@ -110,10 +110,6 @@ class LaspCorpusBuilder:
     def is_valid_domain(self, url):
         return 'lasp.colorado.edu' in urlparse(url).netloc
 
-    def is_excluded_url(self, url):
-        """Exclude sections we do not want in the corpus."""
-        return urlparse(url).path.startswith('/people/')
-
     def save_file(self, content, filename, category, is_binary=False, source_url=None):
         filepath = os.path.join(self.dirs[category], filename)
         if os.path.exists(filepath):
@@ -136,7 +132,6 @@ class LaspCorpusBuilder:
             depth > max_depth
             or normalized_url in self.visited_urls
             or not self.is_valid_domain(normalized_url)
-            or self.is_excluded_url(normalized_url)
         ):
             return
 
@@ -186,7 +181,6 @@ class LaspCorpusBuilder:
                     self.download_binary(full_url, 'pds_data')
                 elif (
                     self.is_valid_domain(full_url)
-                    and not self.is_excluded_url(full_url)
                     and full_url not in self.visited_urls
                 ):
                     time.sleep(0.5) # Politeness delay
@@ -282,7 +276,7 @@ class LaspCorpusBuilder:
         all_urls = self.fetch_sitemap_urls(sitemap_url)
         valid_urls = [
             url for url in all_urls
-            if self.is_valid_domain(url) and not self.is_excluded_url(url)
+            if self.is_valid_domain(url)
         ]
         logging.info(
             f"[SITEMAP] {len(valid_urls)} valid LASP URLs to crawl "
@@ -345,6 +339,13 @@ if __name__ == "__main__":
             "[SITEMAP] No URLs found via sitemap — falling back to recursive crawl"
         )
         builder.scrape_web_and_pds("https://lasp.colorado.edu/missions/", max_depth=4)
+    
+    # Ensure scientific publications page is always crawled
+    logging.info("=== SCANNING SCIENTIFIC PUBLICATIONS ===")
+    builder.scrape_web_and_pds(
+        "https://lasp.colorado.edu/our-expertise/science/scientific-publications/",
+        max_depth=2,
+    )
     
     # 3. Fetch Engineering GitHub Repos
     logging.info("=== STARTING PILLAR 3: GITHUB REPOS ===")
