@@ -94,6 +94,7 @@ class TestModuleExportsAllTools:
             "_build_sdc_params",
             "_sdc_get",
             "_hapi_get",
+            "_validate_sdc_filter",
         ]
         for name in expected_helpers:
             assert hasattr(mod, name), f"Missing helper: {name}"
@@ -109,6 +110,86 @@ class TestModuleExportsAllTools:
         assert mod.MMS_SDC_TIMEOUT > 0
         assert mod.AIM_TIMEOUT > 0
         assert mod.HAPI_TIMEOUT > 0
+
+
+
+# ---------------------------------------------------------------------------
+# _validate_sdc_filter
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSdcFilter:
+    """_validate_sdc_filter accepts valid values and rejects invalid ones."""
+
+    def test_none_value_returns_none(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        assert mod._validate_sdc_filter("sc_id", None, mod._VALID_SC_IDS) is None
+
+    def test_valid_single_value_returns_none(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        assert mod._validate_sdc_filter("sc_id", "mms1", mod._VALID_SC_IDS) is None
+
+    def test_valid_comma_separated_values_return_none(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        assert mod._validate_sdc_filter("sc_id", "mms1,mms2", mod._VALID_SC_IDS) is None
+
+    def test_invalid_value_returns_error_string(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        result = mod._validate_sdc_filter("sc_id", "mms9", mod._VALID_SC_IDS)
+        assert isinstance(result, str)
+        assert "mms9" in result
+        assert "sc_id" in result
+
+    def test_mixed_valid_and_invalid_returns_error(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        result = mod._validate_sdc_filter("sc_id", "mms1,mms9", mod._VALID_SC_IDS)
+        assert isinstance(result, str)
+        assert "mms9" in result
+        # Only the invalid token should appear in the "Invalid … value(s):" portion.
+        assert result.startswith("Invalid sc_id value(s): mms9.")
+
+
+class TestMmsValidation:
+    """list_mms_files and get_mms_file_urls reject invalid filter values."""
+
+    def test_list_mms_files_invalid_sc_id_returns_error(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        result = asyncio.run(mod.list_mms_files(sc_id="invalid_sc"))
+        assert "error" in result
+        assert "sc_id" in result["error"]
+
+    def test_list_mms_files_invalid_instrument_returns_error(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        result = asyncio.run(mod.list_mms_files(instrument_id="xyz"))
+        assert "error" in result
+
+    def test_get_mms_file_urls_invalid_data_rate_returns_error(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        result = asyncio.run(mod.get_mms_file_urls(data_rate_mode="turbo"))
+        assert "error" in result
+
+    def test_get_mms_file_urls_invalid_data_level_returns_error(self):
+        _fresh_module()
+        import lasp_mcp as mod
+
+        result = asyncio.run(mod.get_mms_file_urls(data_level="l99"))
+        assert "error" in result
 
 
 # ---------------------------------------------------------------------------

@@ -11,16 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from _helpers import make_fake_doc as _make_fake_doc
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_fake_doc(content: str, source: str = "lasp_doc.pdf", source_url: str = ""):
-    doc = MagicMock()
-    doc.page_content = content
-    doc.metadata = {"source": source, "page": 1, "source_url": source_url}
-    return doc
 
 
 def _fresh_bot_module():

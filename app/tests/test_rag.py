@@ -13,18 +13,7 @@ import rag
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 
-
-# ---------------------------------------------------------------------------
-# Helpers / fixtures
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_doc(content: str, source: str = "lasp_doc.pdf", page: int = 1, source_url: str = ""):
-    """Return a minimal langchain Document-like object."""
-    doc = MagicMock()
-    doc.page_content = content
-    doc.metadata = {"source": source, "page": page, "source_url": source_url}
-    return doc
+from _helpers import make_fake_doc as _make_fake_doc
 
 
 def _make_fake_llm_response(text: str):

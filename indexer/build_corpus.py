@@ -1,6 +1,21 @@
-# LASP Corpus Builder
-# pip install -r requirements.txt
-# python build_corpus.py
+"""
+build_corpus.py — Comprehensive LASP corpus builder for the RAG pipeline.
+
+Crawls the LASP website and associated data sources to build a multi-format
+document corpus for indexing. Handles PDFs, HTML text, NASA PDS metadata
+labels, XML files, and GitHub documentation. Resumable via a persisted crawl
+state file so interrupted runs can continue without re-downloading files.
+
+Usage:
+    pip install -r requirements.txt
+    python build_corpus.py
+
+Output:
+    A corpus directory (default: lasp_corpus/) containing sub-directories
+    for each content type plus a source_manifest.json that maps each saved
+    file to its original URL. Pass the corpus directory to build_index.py to
+    produce the FAISS vector index.
+"""
 
 import os
 import re

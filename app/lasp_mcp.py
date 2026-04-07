@@ -80,7 +80,7 @@ MCP_HOST: str = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT: int = int(os.getenv("MCP_PORT", "8001"))
 
 # ---------------------------------------------------------------------------
-# MMS SDC — shared constants
+# MMS SDC — shared constants and parameter descriptions
 # ---------------------------------------------------------------------------
 
 _VALID_SC_IDS = {"mms1", "mms2", "mms3", "mms4"}
@@ -90,6 +90,48 @@ _VALID_INSTRUMENTS = {
 }
 _VALID_DATA_RATES = {"brst", "fast", "slow", "srvy"}
 _VALID_DATA_LEVELS = {"l1a", "l1b", "l2", "l2pre", "l3", "ql"}
+
+# Field descriptions shared between list_mms_files and get_mms_file_urls.
+_MMS_SC_ID_DESC = (
+    "Spacecraft ID — one or more of mms1, mms2, mms3, mms4 "
+    "(comma-separated). Leave blank to include all spacecraft."
+)
+_MMS_INSTRUMENT_DESC = (
+    "Instrument identifier — e.g. fgm, fpi, edp, hpca, mec, scm, "
+    "edi, feeps, epd-eis, aspoc, dsp, ulf, afg, sdp "
+    "(comma-separated). Leave blank to include all instruments."
+)
+_MMS_DATA_RATE_DESC = (
+    "Data rate mode — one or more of srvy, brst, fast, slow "
+    "(comma-separated). Leave blank to include all data rates."
+)
+_MMS_DATA_LEVEL_DESC = (
+    "Data processing level — one or more of l1a, l1b, l2, l2pre, "
+    "l3, ql (comma-separated). Leave blank to include all levels."
+)
+_MMS_START_DATE_DESC = "Start of the time range in YYYY-MM-DD format."
+_MMS_END_DATE_DESC = "End of the time range in YYYY-MM-DD format."
+_MMS_VERSION_DESC = (
+    "File version string (e.g. '3.3.0'). Leave blank to return all versions."
+)
+
+
+def _validate_sdc_filter(
+    param_name: str, value: str | None, valid_values: set[str]
+) -> str | None:
+    """Return an error message if any comma-separated value is not in *valid_values*.
+
+    Returns ``None`` when the value is absent or every token is valid.
+    """
+    if not value:
+        return None
+    invalid = [v.strip() for v in value.split(",") if v.strip() and v.strip() not in valid_values]
+    if invalid:
+        return (
+            f"Invalid {param_name} value(s): {', '.join(invalid)}. "
+            f"Valid values: {', '.join(sorted(valid_values))}."
+        )
+    return None
 
 # ---------------------------------------------------------------------------
 # MCP server
@@ -370,68 +412,31 @@ async def list_lisird_datasets() -> dict[str, Any]:
 async def list_mms_files(
     sc_id: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Spacecraft ID — one or more of mms1, mms2, mms3, mms4 "
-                "(comma-separated). Leave blank to include all spacecraft."
-            ),
-        ),
+        Field(default=None, description=_MMS_SC_ID_DESC),
     ] = None,
     instrument_id: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Instrument identifier — e.g. fgm, fpi, edp, hpca, mec, scm, "
-                "edi, feeps, epd-eis, aspoc, dsp, ulf, afg, sdp "
-                "(comma-separated). Leave blank to include all instruments."
-            ),
-        ),
+        Field(default=None, description=_MMS_INSTRUMENT_DESC),
     ] = None,
     data_rate_mode: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Data rate mode — one or more of srvy, brst, fast, slow "
-                "(comma-separated). Leave blank to include all data rates."
-            ),
-        ),
+        Field(default=None, description=_MMS_DATA_RATE_DESC),
     ] = None,
     data_level: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Data processing level — one or more of l1a, l1b, l2, l2pre, "
-                "l3, ql (comma-separated). Leave blank to include all levels."
-            ),
-        ),
+        Field(default=None, description=_MMS_DATA_LEVEL_DESC),
     ] = None,
     start_date: Annotated[
         str | None,
-        Field(
-            default=None,
-            description="Start of the time range in YYYY-MM-DD format.",
-        ),
+        Field(default=None, description=_MMS_START_DATE_DESC),
     ] = None,
     end_date: Annotated[
         str | None,
-        Field(
-            default=None,
-            description="End of the time range in YYYY-MM-DD format.",
-        ),
+        Field(default=None, description=_MMS_END_DATE_DESC),
     ] = None,
     version: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "File version string (e.g. '3.3.0'). Leave blank to return all "
-                "versions."
-            ),
-        ),
+        Field(default=None, description=_MMS_VERSION_DESC),
     ] = None,
 ) -> dict[str, Any]:
     """List available MMS science data files matching the supplied filters.
@@ -451,6 +456,16 @@ async def list_mms_files(
             end_date="2016-03-31",
         )
     """
+    for param_name, value, valid in (
+        ("sc_id", sc_id, _VALID_SC_IDS),
+        ("instrument_id", instrument_id, _VALID_INSTRUMENTS),
+        ("data_rate_mode", data_rate_mode, _VALID_DATA_RATES),
+        ("data_level", data_level, _VALID_DATA_LEVELS),
+    ):
+        err = _validate_sdc_filter(param_name, value, valid)
+        if err:
+            return {"error": err}
+
     params = _build_sdc_params(
         sc_id, instrument_id, data_rate_mode, data_level, start_date, end_date, version
     )
@@ -469,68 +484,31 @@ async def list_mms_files(
 async def get_mms_file_urls(
     sc_id: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Spacecraft ID — one or more of mms1, mms2, mms3, mms4 "
-                "(comma-separated). Leave blank to include all spacecraft."
-            ),
-        ),
+        Field(default=None, description=_MMS_SC_ID_DESC),
     ] = None,
     instrument_id: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Instrument identifier — e.g. fgm, fpi, edp, hpca, mec, scm, "
-                "edi, feeps, epd-eis, aspoc, dsp, ulf, afg, sdp "
-                "(comma-separated). Leave blank to include all instruments."
-            ),
-        ),
+        Field(default=None, description=_MMS_INSTRUMENT_DESC),
     ] = None,
     data_rate_mode: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Data rate mode — one or more of srvy, brst, fast, slow "
-                "(comma-separated). Leave blank to include all data rates."
-            ),
-        ),
+        Field(default=None, description=_MMS_DATA_RATE_DESC),
     ] = None,
     data_level: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "Data processing level — one or more of l1a, l1b, l2, l2pre, "
-                "l3, ql (comma-separated). Leave blank to include all levels."
-            ),
-        ),
+        Field(default=None, description=_MMS_DATA_LEVEL_DESC),
     ] = None,
     start_date: Annotated[
         str | None,
-        Field(
-            default=None,
-            description="Start of the time range in YYYY-MM-DD format.",
-        ),
+        Field(default=None, description=_MMS_START_DATE_DESC),
     ] = None,
     end_date: Annotated[
         str | None,
-        Field(
-            default=None,
-            description="End of the time range in YYYY-MM-DD format.",
-        ),
+        Field(default=None, description=_MMS_END_DATE_DESC),
     ] = None,
     version: Annotated[
         str | None,
-        Field(
-            default=None,
-            description=(
-                "File version string (e.g. '3.3.0'). Leave blank to return all "
-                "versions."
-            ),
-        ),
+        Field(default=None, description=_MMS_VERSION_DESC),
     ] = None,
 ) -> dict[str, Any]:
     """Retrieve download URLs for MMS science data files.
@@ -549,6 +527,16 @@ async def get_mms_file_urls(
             end_date="2016-10-16",
         )
     """
+    for param_name, value, valid in (
+        ("sc_id", sc_id, _VALID_SC_IDS),
+        ("instrument_id", instrument_id, _VALID_INSTRUMENTS),
+        ("data_rate_mode", data_rate_mode, _VALID_DATA_RATES),
+        ("data_level", data_level, _VALID_DATA_LEVELS),
+    ):
+        err = _validate_sdc_filter(param_name, value, valid)
+        if err:
+            return {"error": err}
+
     params = _build_sdc_params(
         sc_id, instrument_id, data_rate_mode, data_level, start_date, end_date, version
     )

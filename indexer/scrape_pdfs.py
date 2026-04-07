@@ -1,3 +1,16 @@
+"""
+scrape_pdfs.py — Lightweight PDF scraper for the LASP website.
+
+Crawls the LASP missions portal (lasp.colorado.edu/missions/) up to a
+configurable depth and downloads every PDF it finds into a local directory.
+
+Usage:
+    python scrape_pdfs.py
+
+Note: For a more comprehensive corpus that also captures HTML text, PDS
+metadata, and GitHub documentation, use build_corpus.py instead.
+"""
+
 import os
 import time
 import logging
