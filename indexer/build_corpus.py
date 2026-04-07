@@ -291,6 +291,98 @@ class LaspCorpusBuilder:
                 queued += 1
         return queued
 
+    def scrape_paginated(self, start_url):
+        """Scrape all pages of a paginated listing by following sub-path links
+        iteratively, without a depth limit.
+
+        Unlike ``scrape_web_and_pds``, which stops at ``max_depth``, this
+        method maintains an explicit queue of every URL whose path starts with
+        the same base path as *start_url*.  This guarantees that all pages of
+        a multi-page listing (regardless of whether the site uses numbered
+        pagination or sequential prev/next links) are visited.
+
+        For each listing page the method:
+        * saves a plain-text copy of the page content, and
+        * downloads any PDF or PDS label files linked from that page.
+
+        Returns the number of listing pages visited.
+        """
+        base_path = urlparse(self._normalize_url(start_url)).path.rstrip('/')
+        queue = [self._normalize_url(start_url)]
+        queued = set(queue)
+        pages_visited = 0
+
+        while queue:
+            url = queue.pop(0)
+            normalized = self._normalize_url(url)
+
+            if normalized in self.visited_urls or not self.is_valid_domain(normalized):
+                continue
+
+            self.visited_urls.add(normalized)
+            self._save_visited_urls()
+
+            time.sleep(0.5)
+            logging.info(f"[PAGINATED] Page {pages_visited + 1}: {normalized}")
+
+            try:
+                response = self.session.get(normalized, timeout=15)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                logging.warning(f"[PAGINATED] Failed to fetch {normalized}: {e}")
+                continue
+
+            pages_visited += 1
+
+            content_type = response.headers.get('Content-Type', '').lower()
+
+            if 'application/pdf' in content_type:
+                self.download_binary(normalized, 'pdf')
+                continue
+
+            if 'text/html' not in content_type:
+                continue
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Collect links from the full DOM before stripping nav/footer for text
+            for link in soup.find_all('a', href=True):
+                href = link.get('href')
+                full_url = self._normalize_url(urljoin(normalized, href).split('#')[0])
+                parsed = urlparse(full_url)
+                lower_path = parsed.path.lower()
+
+                if lower_path.endswith('.pdf'):
+                    self.download_binary(full_url, 'pdf')
+                elif lower_path.endswith(('.lbl', '.xml')):
+                    self.download_binary(full_url, 'pds_data')
+                elif (
+                    parsed.path.startswith(base_path)
+                    and self.is_valid_domain(full_url)
+                    and full_url not in queued
+                    and full_url not in self.visited_urls
+                ):
+                    queued.add(full_url)
+                    queue.append(full_url)
+
+            # Save plain-text version of the listing page
+            for tag in soup(["script", "style", "nav", "footer"]):
+                tag.decompose()
+            text = "\n".join(
+                line.strip() for line in soup.get_text().splitlines() if line.strip()
+            )
+            safe_name = (
+                urlparse(normalized).path.strip('/').replace('/', '_') or 'index'
+            )
+            self.save_file(
+                text, f"{safe_name}.txt", 'html_text', source_url=normalized
+            )
+
+        logging.info(
+            f"[PAGINATED] Done: {pages_visited} listing pages visited from {start_url}"
+        )
+        return pages_visited
+
     def fetch_github_repos(self, org="lasp"):
         """Pillar 3: Pull READMEs and Docs from LASP GitHub using API"""
         logging.info(f"[GITHUB] Fetching repositories for {org}...")
@@ -340,11 +432,12 @@ if __name__ == "__main__":
         )
         builder.scrape_web_and_pds("https://lasp.colorado.edu/missions/", max_depth=4)
     
-    # Ensure scientific publications page is always crawled
+    # Ensure scientific publications page is always crawled.
+    # scrape_paginated is used here instead of scrape_web_and_pds so that
+    # every paginated sub-page is visited regardless of how many pages exist.
     logging.info("=== SCANNING SCIENTIFIC PUBLICATIONS ===")
-    builder.scrape_web_and_pds(
-        "https://lasp.colorado.edu/our-expertise/science/scientific-publications/",
-        max_depth=2,
+    builder.scrape_paginated(
+        "https://lasp.colorado.edu/our-expertise/science/scientific-publications/"
     )
     
     # 3. Fetch Engineering GitHub Repos
