@@ -3,6 +3,7 @@
 # python build_corpus.py
 
 import os
+import re
 import time
 import json
 import logging
@@ -167,6 +168,8 @@ class LaspCorpusBuilder:
             self.save_file(text_content, f"{safe_name}.txt", 'html_text', source_url=normalized_url)
 
             # Find links to follow or download
+            current_base_path = urlparse(normalized_url).path.rstrip('/')
+            pagination_triggered = False
             for link in soup.find_all('a', href=True):
                 href = link.get('href')
                 full_url = self._normalize_url(urljoin(normalized_url, href).split('#')[0])
@@ -183,8 +186,19 @@ class LaspCorpusBuilder:
                     self.is_valid_domain(full_url)
                     and full_url not in self.visited_urls
                 ):
-                    time.sleep(0.5) # Politeness delay
-                    self.scrape_web_and_pds(full_url, depth + 1, max_depth)
+                    if (
+                        not pagination_triggered
+                        and re.search(r'/page/\d+/?$', parsed_url.path)
+                        and parsed_url.path.startswith(current_base_path)
+                    ):
+                        # Pagination sub-page detected — hand off to
+                        # scrape_paginated so every page in the series is
+                        # visited without depth-limit restrictions.
+                        pagination_triggered = True
+                        self.scrape_paginated(full_url, base_path=current_base_path)
+                    elif not re.search(r'/page/\d+/?$', parsed_url.path):
+                        time.sleep(0.5) # Politeness delay
+                        self.scrape_web_and_pds(full_url, depth + 1, max_depth)
 
     def download_binary(self, url, category):
         # Safely extract the filename, ignoring query parameters like ?v=1
@@ -283,23 +297,44 @@ class LaspCorpusBuilder:
             f"(out of {len(all_urls)} total)"
         )
         queued = 0
+        paginated_bases_queued = set()
         for url in valid_urls:
             normalized = self._normalize_url(url)
             if normalized not in self.visited_urls:
                 time.sleep(0.5)
-                self.scrape_web_and_pds(normalized, depth=0, max_depth=1)
-                queued += 1
+                parsed = urlparse(normalized)
+                if re.search(r'/page/\d+/?$', parsed.path):
+                    # This is a paginated sub-page URL — derive the listing
+                    # base URL and use scrape_paginated so that every page in
+                    # the series is visited rather than just this one entry.
+                    base_path_str = re.sub(r'/page/\d+/?$', '', parsed.path) or '/'
+                    base_url = self._normalize_url(
+                        f"{parsed.scheme}://{parsed.netloc}{base_path_str}"
+                    )
+                    if base_url not in paginated_bases_queued:
+                        paginated_bases_queued.add(base_url)
+                        self.scrape_paginated(base_url)
+                        queued += 1
+                else:
+                    self.scrape_web_and_pds(normalized, depth=0, max_depth=1)
+                    queued += 1
         return queued
 
-    def scrape_paginated(self, start_url):
+    def scrape_paginated(self, start_url, base_path=None):
         """Scrape all pages of a paginated listing by following sub-path links
         iteratively, without a depth limit.
 
         Unlike ``scrape_web_and_pds``, which stops at ``max_depth``, this
         method maintains an explicit queue of every URL whose path starts with
-        the same base path as *start_url*.  This guarantees that all pages of
-        a multi-page listing (regardless of whether the site uses numbered
-        pagination or sequential prev/next links) are visited.
+        *base_path*.  This guarantees that all pages of a multi-page listing
+        (regardless of whether the site uses numbered pagination or sequential
+        prev/next links) are visited.
+
+        *base_path* defaults to the path of *start_url* with any trailing
+        slash stripped.  Pass an explicit *base_path* when calling from
+        ``scrape_web_and_pds`` with a pagination sub-page URL (e.g.
+        ``/publications/page/2/``) so that all sibling pages under the parent
+        listing path are still reachable.
 
         For each listing page the method:
         * saves a plain-text copy of the page content, and
@@ -307,7 +342,8 @@ class LaspCorpusBuilder:
 
         Returns the number of listing pages visited.
         """
-        base_path = urlparse(self._normalize_url(start_url)).path.rstrip('/')
+        if base_path is None:
+            base_path = urlparse(self._normalize_url(start_url)).path.rstrip('/')
         queue = [self._normalize_url(start_url)]
         queued = set(queue)
         pages_visited = 0

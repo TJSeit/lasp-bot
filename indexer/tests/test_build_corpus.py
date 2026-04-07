@@ -589,3 +589,249 @@ class TestScrapePaginated:
         assert builder._normalize_url(f"{PUB_BASE}/page/3/") in builder.visited_urls
         assert builder._normalize_url(f"{PUB_BASE}/page/4/") in builder.visited_urls
 
+
+# ---------------------------------------------------------------------------
+# crawl_from_sitemap — paginated URL detection
+# ---------------------------------------------------------------------------
+
+
+class TestCrawlFromSitemapPaginatedDetection:
+    """crawl_from_sitemap routes /page/N/ sitemap URLs through scrape_paginated."""
+
+    def test_pagination_url_triggers_scrape_paginated(self, tmp_path):
+        """A sitemap URL containing /page/N/ must be processed with
+        scrape_paginated on the derived base URL rather than scrape_web_and_pds."""
+        builder = _make_builder(tmp_path)
+        builder.fetch_sitemap_urls = MagicMock(
+            return_value=[
+                "https://lasp.colorado.edu/our-expertise/science/scientific-publications/page/2/",
+            ]
+        )
+        builder.scrape_web_and_pds = MagicMock()
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            queued = builder.crawl_from_sitemap("https://lasp.colorado.edu/sitemap.xml")
+
+        assert queued == 1
+        builder.scrape_paginated.assert_called_once()
+        called_url = builder.scrape_paginated.call_args[0][0]
+        assert "page/2" not in called_url, (
+            "scrape_paginated must be called with the base listing URL, not the /page/N/ URL"
+        )
+        assert called_url == "https://lasp.colorado.edu/our-expertise/science/scientific-publications"
+        builder.scrape_web_and_pds.assert_not_called()
+
+    def test_multiple_pagination_urls_same_base_deduplicates(self, tmp_path):
+        """Multiple /page/N/ URLs with the same base must trigger only one
+        scrape_paginated call for that base."""
+        builder = _make_builder(tmp_path)
+        builder.fetch_sitemap_urls = MagicMock(
+            return_value=[
+                "https://lasp.colorado.edu/publications/page/2/",
+                "https://lasp.colorado.edu/publications/page/3/",
+                "https://lasp.colorado.edu/publications/page/4/",
+            ]
+        )
+        builder.scrape_web_and_pds = MagicMock()
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            builder.crawl_from_sitemap("https://lasp.colorado.edu/sitemap.xml")
+
+        assert builder.scrape_paginated.call_count == 1, (
+            "scrape_paginated must be called exactly once for the shared base URL"
+        )
+
+    def test_non_pagination_urls_still_use_scrape_web_and_pds(self, tmp_path):
+        """Regular (non-paginated) sitemap URLs must still be scraped with
+        scrape_web_and_pds, unaffected by the pagination detection logic."""
+        builder = _make_builder(tmp_path)
+        builder.fetch_sitemap_urls = MagicMock(
+            return_value=[
+                "https://lasp.colorado.edu/missions/maven/",
+                "https://lasp.colorado.edu/about/",
+            ]
+        )
+        builder.scrape_web_and_pds = MagicMock()
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            queued = builder.crawl_from_sitemap("https://lasp.colorado.edu/sitemap.xml")
+
+        assert queued == 2
+        assert builder.scrape_web_and_pds.call_count == 2
+        builder.scrape_paginated.assert_not_called()
+
+    def test_mixed_urls_route_correctly(self, tmp_path):
+        """A sitemap with both regular and paginated URLs must route each to
+        the correct scraper."""
+        builder = _make_builder(tmp_path)
+        builder.fetch_sitemap_urls = MagicMock(
+            return_value=[
+                "https://lasp.colorado.edu/missions/maven/",
+                "https://lasp.colorado.edu/publications/page/2/",
+            ]
+        )
+        builder.scrape_web_and_pds = MagicMock()
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            queued = builder.crawl_from_sitemap("https://lasp.colorado.edu/sitemap.xml")
+
+        assert queued == 2
+        builder.scrape_web_and_pds.assert_called_once()
+        builder.scrape_paginated.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# scrape_web_and_pds — pagination link detection
+# ---------------------------------------------------------------------------
+
+
+class TestScrapeWebAndPdsPaginationDetection:
+    """scrape_web_and_pds routes pagination links through scrape_paginated."""
+
+    def _html_with_pagination(self, base_url, page_urls, pdf_urls=(), other_urls=()):
+        """Return HTML bytes containing links to the given URLs."""
+        links = "".join(
+            f'<a href="{u}">link</a>' for u in list(page_urls) + list(pdf_urls) + list(other_urls)
+        )
+        return f"<html><body>{links}</body></html>".encode()
+
+    def test_pagination_link_triggers_scrape_paginated(self, tmp_path):
+        """When a page contains a /page/N/ link under its own path,
+        scrape_paginated must be called instead of recursing."""
+        BASE = "https://lasp.colorado.edu/publications"
+        html = self._html_with_pagination(
+            BASE,
+            page_urls=[f"{BASE}/page/2/"],
+        )
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "text/html"}
+            resp.text = html.decode()
+            resp.content = html
+            return resp
+
+        builder = _make_builder(tmp_path)
+        builder.session.get = MagicMock(side_effect=fake_get)
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            builder.scrape_web_and_pds(BASE + "/")
+
+        builder.scrape_paginated.assert_called_once()
+        call_args = builder.scrape_paginated.call_args
+        assert call_args[0][0] == builder._normalize_url(f"{BASE}/page/2/"), (
+            "scrape_paginated must be called with the pagination link URL"
+        )
+        assert call_args[1].get("base_path") == "/publications", (
+            "base_path keyword arg must be the current page's path"
+        )
+
+    def test_pagination_only_triggered_once_per_page(self, tmp_path):
+        """When multiple /page/N/ links appear on one page, scrape_paginated
+        must be called only once (for the first pagination link found)."""
+        BASE = "https://lasp.colorado.edu/publications"
+        html = self._html_with_pagination(
+            BASE,
+            page_urls=[f"{BASE}/page/2/", f"{BASE}/page/3/", f"{BASE}/page/4/"],
+        )
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "text/html"}
+            resp.text = html.decode()
+            resp.content = html
+            return resp
+
+        builder = _make_builder(tmp_path)
+        builder.session.get = MagicMock(side_effect=fake_get)
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            builder.scrape_web_and_pds(BASE + "/")
+
+        assert builder.scrape_paginated.call_count == 1, (
+            "scrape_paginated must be triggered at most once per page visit"
+        )
+
+    def test_non_pagination_links_still_followed(self, tmp_path):
+        """Ordinary internal links must still be recursed into with
+        scrape_web_and_pds even when pagination links are also present."""
+        BASE = "https://lasp.colorado.edu/publications"
+        OTHER = "https://lasp.colorado.edu/missions/maven/"
+        html = self._html_with_pagination(
+            BASE,
+            page_urls=[f"{BASE}/page/2/"],
+            other_urls=[OTHER],
+        )
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "text/html"}
+            resp.text = html.decode()
+            resp.content = html
+            return resp
+
+        builder = _make_builder(tmp_path)
+        builder.session.get = MagicMock(side_effect=fake_get)
+        builder.scrape_paginated = MagicMock()
+
+        recursed_into = []
+        original_scrape = builder.scrape_web_and_pds
+
+        def tracking_scrape(url, depth=0, max_depth=4):
+            recursed_into.append(url)
+            if builder._normalize_url(url) != builder._normalize_url(BASE + "/"):
+                # Don't recurse further into non-base pages to keep the test simple
+                return
+            original_scrape(url, depth=depth, max_depth=max_depth)
+
+        builder.scrape_web_and_pds = tracking_scrape
+
+        with patch("time.sleep"):
+            tracking_scrape(BASE + "/", depth=0, max_depth=4)
+
+        assert any("missions/maven" in u for u in recursed_into), (
+            "Regular internal links must still be followed with scrape_web_and_pds"
+        )
+
+    def test_off_path_pagination_links_not_routed(self, tmp_path):
+        """A /page/N/ URL under a *different* base path must not be treated as
+        a pagination link for the current page."""
+        BASE = "https://lasp.colorado.edu/publications"
+        OTHER_PAGINATED = "https://lasp.colorado.edu/news/page/2/"
+        html = self._html_with_pagination(
+            BASE,
+            page_urls=[OTHER_PAGINATED],
+        )
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "text/html"}
+            resp.text = html.decode()
+            resp.content = html
+            return resp
+
+        builder = _make_builder(tmp_path)
+        builder.session.get = MagicMock(side_effect=fake_get)
+        builder.scrape_paginated = MagicMock()
+
+        with patch("time.sleep"):
+            # Depth limit 0 so we don't actually recurse further
+            from build_corpus import LaspCorpusBuilder
+            LaspCorpusBuilder.scrape_web_and_pds(builder, BASE + "/", depth=0, max_depth=0)
+
+        builder.scrape_paginated.assert_not_called()
+
