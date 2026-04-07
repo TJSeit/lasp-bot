@@ -50,7 +50,8 @@ class TestOnReady:
         fake_retriever = MagicMock()
         fake_llm = MagicMock()
 
-        with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)):
+        with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)), \
+             patch("lasp_mcp.run_in_background"):
             import discord_bot
 
             fake_user = MagicMock()
@@ -65,7 +66,8 @@ class TestOnReady:
     def test_on_ready_handles_build_failure_gracefully(self, capsys):
         _fresh_bot_module()
 
-        with patch("rag.build_rag_chain", side_effect=RuntimeError("index not found")):
+        with patch("rag.build_rag_chain", side_effect=RuntimeError("index not found")), \
+             patch("lasp_mcp.run_in_background"):
             import discord_bot
 
             fake_user = MagicMock()

@@ -10,12 +10,14 @@ The RAG chain (FAISS retriever + Ollama LLM client) is initialised
 once on startup via a lifespan context manager so it is shared across requests.
 """
 
+import os
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from lasp_mcp import run_in_background
 from rag import answer_query, build_rag_chain
 
 _state: dict = {}
@@ -24,6 +26,8 @@ _state: dict = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load the FAISS index from local storage and initialise the RAG chain."""
+    if os.getenv("MCP_ENABLED", "true").lower() != "false":
+        run_in_background()
     retriever, llm_client = build_rag_chain()
     _state["retriever"] = retriever
     _state["llm_client"] = llm_client

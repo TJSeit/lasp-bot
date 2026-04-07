@@ -325,7 +325,8 @@ def app_client():
         "LASP is located in Boulder, Colorado."
     )
 
-    with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)):
+    with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)), \
+         patch("lasp_mcp.run_in_background"):
         import main as app_module
 
         with TestClient(app_module.app) as client:
@@ -374,7 +375,8 @@ class TestQueryEndpoint:
         fake_llm = MagicMock()
         fake_llm.chat.side_effect = RuntimeError("LLM unavailable")
 
-        with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)):
+        with patch("rag.build_rag_chain", return_value=(fake_retriever, fake_llm)), \
+             patch("lasp_mcp.run_in_background"):
             import main as app_module
 
             with TestClient(app_module.app, raise_server_exceptions=False) as client:

@@ -42,6 +42,7 @@ Run as a standalone MCP server:
 from __future__ import annotations
 
 import os
+import threading
 from typing import Annotated, Any
 
 import httpx
@@ -75,6 +76,9 @@ AIM_TIMEOUT: float = float(os.getenv("AIM_TIMEOUT", "30"))
 
 HAPI_TIMEOUT: float = float(os.getenv("HAPI_TIMEOUT", "30"))
 
+MCP_HOST: str = os.getenv("MCP_HOST", "127.0.0.1")
+MCP_PORT: int = int(os.getenv("MCP_PORT", "8001"))
+
 # ---------------------------------------------------------------------------
 # MMS SDC — shared constants
 # ---------------------------------------------------------------------------
@@ -101,7 +105,30 @@ mcp = FastMCP(
         "- Mesospheric clouds (AIM CIPS): query_mesospheric_data\n"
         "- Heliophysics time-series (HAPI): hapi_time_series_stream"
     ),
+    host=MCP_HOST,
+    port=MCP_PORT,
 )
+
+
+def run_in_background() -> threading.Thread:
+    """Start the MCP server in a background daemon thread using the streamable-HTTP transport.
+
+    The thread is a daemon so it is automatically cleaned up when the main
+    process exits.  Call this from the FastAPI lifespan or the Discord bot's
+    ``on_ready`` handler to co-locate the MCP server with the chatbot.
+
+    Returns the started Thread so callers can inspect it if needed.
+    """
+    def _run() -> None:
+        try:
+            mcp.run(transport="streamable-http")
+        except Exception as exc:  # pragma: no cover
+            print(f"MCP server stopped unexpectedly: {exc}")
+
+    thread = threading.Thread(target=_run, name="mcp-server", daemon=True)
+    thread.start()
+    print(f"MCP server starting on http://{MCP_HOST}:{MCP_PORT}/mcp")
+    return thread
 
 # ---------------------------------------------------------------------------
 # Internal helpers — LaTiS (LISIRD & AIM CIPS)
