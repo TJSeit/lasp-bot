@@ -14,7 +14,7 @@ A retrieval-augmented generation (RAG) chatbot that answers questions about the
 │  Local machine (NVIDIA GPU recommended)                      │
 │                                                              │
 │  indexer/build_index.py                                      │
-│    ├─ Loads PDFs with LangChain PyPDFDirectoryLoader         │
+│    ├─ Loads PDFs, text, XML, and label files (multi-format)  │
 │    ├─ Splits text into overlapping chunks                    │
 │    ├─ Generates embeddings with sentence-transformers (GPU)  │
 │    └─ Saves FAISS index to local directory                   │
@@ -94,24 +94,45 @@ cp .env.example .env
 | `AIM_TIMEOUT` | HTTP timeout for AIM CIPS requests in seconds (default: `30`) |
 | `HAPI_TIMEOUT` | HTTP timeout for HAPI server requests in seconds (default: `30`) |
 
-### 3 — Build the FAISS index (local, GPU)
+### 3 — Build the LASP corpus (local)
+
+Before indexing you need a local corpus directory containing LASP documents.
+Use `build_corpus.py` (recommended) for a comprehensive multi-format corpus, or
+`scrape_pdfs.py` if you only need PDFs.
+
+```bash
+cd indexer
+pip install -r requirements.txt
+
+# Recommended: full corpus (HTML text, PDFs, PDS labels, XML, GitHub docs)
+python build_corpus.py          # writes to lasp_corpus/ by default
+
+# Alternative: PDFs only
+python scrape_pdfs.py           # writes to lasp_pdfs/ by default
+```
+
+`build_corpus.py` saves a `source_manifest.json` that maps every file to its
+original URL so source links appear in bot answers.
+
+### 4 — Build the FAISS index (local, GPU)
 
 ```bash
 cd indexer
 pip install -r requirements.txt
 # For CUDA 12 GPU support:
 # pip install faiss-gpu-cu12
-python build_index.py /path/to/lasp/pdfs
+python build_index.py /path/to/lasp/corpus
 ```
 
-The script loads every `.pdf` in the given directory, splits pages into chunks,
-generates embeddings on the local GPU, and saves a FAISS index to
-`lasp_faiss_index/` (or the path specified with `--output`).
+The script loads every `.pdf`, `.txt`, `.md`, `.xml`, and `.lbl` file in the
+given directory, splits pages into chunks, generates embeddings on the local
+GPU, and saves a FAISS index to `lasp_faiss_index/` (or the path specified
+with `--output`).
 
-### 4 — Run the FastAPI app locally
+### 5 — Run the FastAPI app locally
 
 Before starting the app, make sure `FAISS_INDEX_DIR` in your `.env` file points
-to the index directory created in step 3.  By default the indexer saves the
+to the index directory created in step 4.  By default the indexer saves the
 index to `lasp_faiss_index/` **inside the `indexer/` directory**, but the app
 runs from the `app/` directory, so the paths don't line up automatically.
 
@@ -158,7 +179,7 @@ curl -X POST http://localhost:8000/query \
   -d '{"question": "What instruments does LASP operate?"}'
 ```
 
-### 5 — Build & run the Docker image (optional)
+### 6 — Build & run the Docker image (optional)
 
 ```bash
 cd app
@@ -174,7 +195,7 @@ The MCP server starts automatically on port **8001** alongside the FastAPI app.
 Set `MCP_HOST=0.0.0.0` so that MCP clients outside the container can reach it.
 To disable the MCP server, pass `-e MCP_ENABLED=false`.
 
-### 6 — Run the Discord bot
+### 7 — Run the Discord bot
 
 1. [Create a Discord application and bot](https://discord.com/developers/applications), then copy the bot token.
 2. Invite the bot to your server with the **Send Messages** and **Read Message History** permissions (and the `MESSAGE_CONTENT` privileged intent enabled in the Developer Portal).
@@ -464,7 +485,10 @@ hapi_time_series_stream(
 ```
 lasp-bot/
 ├── indexer/
-│   ├── build_index.py   # Local GPU script: PDFs → FAISS (saved locally)
+│   ├── build_corpus.py  # Comprehensive corpus builder (HTML, PDFs, PDS, GitHub)
+│   ├── build_index.py   # Local GPU script: corpus → FAISS (saved locally)
+│   ├── scrape_pdfs.py   # Lightweight PDF-only scraper (subset of build_corpus)
+│   ├── discovery_script.py  # One-shot mission URL discovery helper
 │   └── requirements.txt
 ├── app/
 │   ├── main.py          # FastAPI application
@@ -474,6 +498,7 @@ lasp-bot/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── tests/
+│       ├── conftest.py
 │       ├── test_rag.py
 │       ├── test_discord_bot.py
 │       └── test_lasp_mcp.py

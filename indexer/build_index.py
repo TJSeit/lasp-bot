@@ -19,24 +19,23 @@ import logging
 import json
 from pathlib import Path
 
-
 import torch
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# LangChain Imports
 from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
-    UnstructuredXMLLoader
+    UnstructuredXMLLoader,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 
-# Configure Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 # Suppress noisy pypdf warnings about malformed PDF internal references
 # (e.g. "Ignoring wrong pointing object") — pypdf handles these gracefully.
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -62,37 +61,38 @@ def _load_source_manifest(corpus_path: Path) -> dict[str, str]:
 
 
 def _manifest_key_for_path(corpus_path: Path, filepath: Path) -> str:
-    return str(filepath.relative_to(corpus_path)).replace('\\', '/')
+    return str(filepath.relative_to(corpus_path)).replace("\\", "/")
 
-def load_documents(corpus_dir):
+
+def load_documents(corpus_dir: str) -> list[Document]:
     """Recursively load documents from the corpus directory based on file type."""
-    documents = []
+    documents: list[Document] = []
     corpus_path = Path(corpus_dir)
     source_manifest = _load_source_manifest(corpus_path)
-    
+
     if not corpus_path.exists():
         logging.error(f"Corpus directory '{corpus_dir}' does not exist.")
         return documents
 
-    # Define how to load specific extensions
+    # Map file extensions to their LangChain loader classes.
     loaders = {
-        '.pdf': PyPDFLoader,
-        '.txt': TextLoader,
-        '.md': TextLoader,
-        '.xml': UnstructuredXMLLoader,
-        '.lbl': TextLoader # Treat NASA PDS label files as plain text
+        ".pdf": PyPDFLoader,
+        ".txt": TextLoader,
+        ".md": TextLoader,
+        ".xml": UnstructuredXMLLoader,
+        ".lbl": TextLoader,  # treat NASA PDS label files as plain text
     }
 
     logging.info(f"Scanning {corpus_dir} for documents...")
-    
-    for filepath in corpus_path.rglob('*'):
+
+    for filepath in corpus_path.rglob("*"):
         if filepath.is_file():
             ext = filepath.suffix.lower()
             if ext in loaders:
                 try:
                     logging.info(f"Loading: {filepath.name}")
                     loader_class = loaders[ext]
-                    # TextLoader requires explicit encoding to prevent crash on weird characters
+                    # TextLoader requires explicit encoding to prevent crash on weird characters.
                     if loader_class == TextLoader:
                         loader = loader_class(str(filepath), autodetect_encoding=True)
                     else:
@@ -109,19 +109,20 @@ def load_documents(corpus_dir):
                     logging.warning(f"Failed to load {filepath.name}: {e}")
             else:
                 logging.debug(f"Skipping unsupported file type: {filepath.name}")
-                
+
     logging.info(f"Successfully loaded {len(documents)} document pages/sections.")
     return documents
 
-def build_index(corpus_dir, output_dir="lasp_faiss_index"):
-    # 1. Load Documents
+
+def build_index(corpus_dir: str, output_dir: str = "lasp_faiss_index") -> None:
+    # 1. Load documents.
     docs = load_documents(corpus_dir)
     if not docs:
         logging.error("No documents loaded. Exiting.")
         return
 
-    # 2. Split Documents into Chunks
-    # LASP docs are highly technical; larger overlap ensures context isn't lost between pages
+    # 2. Split documents into chunks.
+    # LASP docs are highly technical; larger overlap ensures context isn't lost between pages.
     logging.info("Splitting documents into chunks...")
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
@@ -132,9 +133,9 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
     chunks = text_splitter.split_documents(docs)
     logging.info(f"Created {len(chunks)} text chunks.")
 
-    # 3. Initialize Embeddings (GPU if available, otherwise CPU)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if device == 'cpu':
+    # 3. Initialize embeddings (GPU if available, otherwise CPU).
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
         logging.warning(
             "CUDA is not available. If you have an NVIDIA GPU, ensure you have "
             "installed the CUDA-enabled PyTorch wheel (the CPU-only wheel is "
@@ -147,17 +148,17 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
     logging.info(f"Initializing HuggingFace Embeddings (model={EMBEDDING_MODEL}) on {device.upper()}...")
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL,
-        model_kwargs={'device': device},
-        encode_kwargs={'normalize_embeddings': True} # Better for cosine similarity
+        model_kwargs={"device": device},
+        encode_kwargs={"normalize_embeddings": True},  # better for cosine similarity
     )
 
-    # 4. Build and Save FAISS Index
+    # 4. Build and save the FAISS index.
     # When CUDA is available, embeddings are generated on the GPU for speed.
     # However, the final FAISS index is always instantiated using the standard
     # faiss-cpu library to guarantee cross-platform compatibility when the
     # index folder is transferred to a Mac mini (or any CPU-only environment).
     logging.info("Building FAISS vector index (this may take a few minutes)...")
-    if device == 'cuda':
+    if device == "cuda":
         logging.info(
             "Generating embeddings on GPU; instantiating FAISS index with "
             "CPU-compatible serialization for Mac/CPU portability..."
@@ -169,14 +170,14 @@ def build_index(corpus_dir, output_dir="lasp_faiss_index"):
         # saved index carries no GPU-specific structures.
         cpu_embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True},
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
         )
         text_embeddings = list(zip(texts, embedding_vectors))
         vector_db = FAISS.from_embeddings(text_embeddings, cpu_embeddings, metadatas=metadatas)
     else:
         vector_db = FAISS.from_documents(chunks, embeddings)
-    
+
     os.makedirs(output_dir, exist_ok=True)
     vector_db.save_local(output_dir)
     logging.info(f"SUCCESS: FAISS index saved locally to '{output_dir}/'")
@@ -186,6 +187,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build a FAISS vector index from the LASP corpus.")
     parser.add_argument("corpus_dir", help="Path to the directory containing scraped LASP data (e.g., lasp_corpus)")
     parser.add_argument("--output", default="lasp_faiss_index", help="Output directory for the FAISS index files")
-    
+
     args = parser.parse_args()
     build_index(args.corpus_dir, args.output)
