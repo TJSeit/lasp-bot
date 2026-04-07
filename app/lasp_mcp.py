@@ -110,6 +110,11 @@ mcp = FastMCP(
 )
 
 
+def _is_mcp_enabled() -> bool:
+    """Return True if the MCP server should start alongside the chatbot."""
+    return os.getenv("MCP_ENABLED", "true").lower() != "false"
+
+
 def run_in_background() -> threading.Thread:
     """Start the MCP server in a background daemon thread using the streamable-HTTP transport.
 
@@ -119,6 +124,8 @@ def run_in_background() -> threading.Thread:
 
     Returns the started Thread so callers can inspect it if needed.
     """
+    print(f"MCP server will start on http://{MCP_HOST}:{MCP_PORT}/mcp")
+
     def _run() -> None:
         try:
             mcp.run(transport="streamable-http")
@@ -127,7 +134,6 @@ def run_in_background() -> threading.Thread:
 
     thread = threading.Thread(target=_run, name="mcp-server", daemon=True)
     thread.start()
-    print(f"MCP server starting on http://{MCP_HOST}:{MCP_PORT}/mcp")
     return thread
 
 # ---------------------------------------------------------------------------
