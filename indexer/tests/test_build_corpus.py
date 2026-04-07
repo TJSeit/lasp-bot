@@ -5,6 +5,7 @@ All network I/O is mocked so the tests run without any internet access.
 """
 
 import os
+from urllib.parse import urlparse
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -334,3 +335,257 @@ class TestCrawlFromSitemap:
         _, kwargs = builder.scrape_web_and_pds.call_args
         assert kwargs.get("depth") == 0
         assert kwargs.get("max_depth") == 1
+
+
+# ---------------------------------------------------------------------------
+# scrape_paginated
+# ---------------------------------------------------------------------------
+
+PUB_BASE = "https://lasp.colorado.edu/our-expertise/science/scientific-publications"
+PUB_BASE_PATH = urlparse(PUB_BASE).path
+
+
+def _html_page(page_num, total_pages, papers_per_page=5, sequential=False):
+    """Return mock HTML for one page of the publications listing.
+
+    When *sequential* is True, only a "Next" link to the immediately following
+    page is included (simulating prev/next-only pagination).  Otherwise, links
+    to every page number are emitted (numbered pagination).
+
+    Page 1 navigation links use the bare base URL (no ``/page/1/`` suffix),
+    matching standard WordPress pagination behaviour.
+    """
+    pdfs = "\n".join(
+        f'<a href="{PUB_BASE}/paper-p{page_num}-{i}.pdf">Paper {page_num}-{i}</a>'
+        for i in range(papers_per_page)
+    )
+
+    def _page_href(p):
+        return PUB_BASE + "/" if p == 1 else f"{PUB_BASE}/page/{p}/"
+
+    if sequential:
+        if page_num < total_pages:
+            nav = f'<a href="{_page_href(page_num + 1)}">Next</a>'
+        else:
+            nav = ""
+    else:
+        nav = "\n".join(
+            f'<a href="{_page_href(p)}">{p}</a>'
+            for p in range(1, total_pages + 1)
+            if p != page_num
+        )
+
+    return (
+        f"<html><body><main>{pdfs}</main><nav>{nav}</nav></body></html>"
+    ).encode()
+
+
+def _pub_session_mock(total_pages, papers_per_page=5, sequential=False):
+    """Return a mock session whose get() simulates paginated publications."""
+    import re
+
+    def fake_get(url, **kwargs):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        parsed_path = urlparse(url).path
+
+        if parsed_path.lower().endswith(".pdf"):
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "application/pdf"}
+            resp.iter_content = MagicMock(return_value=iter([b"%PDF fake"]))
+            return resp
+
+        if PUB_BASE_PATH in parsed_path:
+            m = re.search(r"/page/(\d+)/?$", parsed_path)
+            page_num = int(m.group(1)) if m else 1
+            html = _html_page(page_num, total_pages, papers_per_page, sequential)
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+            resp.text = html.decode()
+            resp.content = html
+            return resp
+
+        resp.status_code = 404
+        resp.raise_for_status.side_effect = requests.exceptions.HTTPError("404")
+        return resp
+
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(side_effect=fake_get)
+    return mock_session
+
+
+class TestScrapePaginated:
+    """LaspCorpusBuilder.scrape_paginated covers all pages of a paginated listing."""
+
+    def test_sequential_pagination_visits_all_pages(self, tmp_path):
+        """All pages must be visited even when each page only has a 'Next' link.
+
+        With max_depth=2 the old scrape_web_and_pds approach would stop after
+        page 3.  scrape_paginated must visit every page regardless.
+        """
+        TOTAL_PAGES = 10
+        builder = _make_builder(tmp_path)
+        builder.session = _pub_session_mock(TOTAL_PAGES, sequential=True)
+
+        with patch("time.sleep"):
+            pages_visited = builder.scrape_paginated(PUB_BASE + "/")
+
+        assert pages_visited == TOTAL_PAGES
+
+        # Every page URL must be in visited_urls
+        for p in range(2, TOTAL_PAGES + 1):
+            page_url = builder._normalize_url(f"{PUB_BASE}/page/{p}/")
+            assert page_url in builder.visited_urls, (
+                f"Page {p} was not visited (sequential pagination)"
+            )
+
+    def test_numbered_pagination_visits_all_pages(self, tmp_path):
+        """All pages must be visited when every page number is visible on the index."""
+        TOTAL_PAGES = 8
+        builder = _make_builder(tmp_path)
+        builder.session = _pub_session_mock(TOTAL_PAGES, sequential=False)
+
+        with patch("time.sleep"):
+            pages_visited = builder.scrape_paginated(PUB_BASE + "/")
+
+        assert pages_visited == TOTAL_PAGES
+
+        for p in range(2, TOTAL_PAGES + 1):
+            page_url = builder._normalize_url(f"{PUB_BASE}/page/{p}/")
+            assert page_url in builder.visited_urls, (
+                f"Page {p} was not visited (numbered pagination)"
+            )
+
+    def test_all_pdfs_downloaded_from_every_page(self, tmp_path):
+        """PDFs linked on any listing page must be saved to the pdf directory."""
+        TOTAL_PAGES = 4
+        PAPERS_PER_PAGE = 3
+        builder = _make_builder(tmp_path)
+        builder.session = _pub_session_mock(
+            TOTAL_PAGES, papers_per_page=PAPERS_PER_PAGE, sequential=True
+        )
+
+        with patch("time.sleep"):
+            builder.scrape_paginated(PUB_BASE + "/")
+
+        pdf_dir = tmp_path / "pdfs"
+        saved_pdfs = list(pdf_dir.glob("*.pdf"))
+        expected = TOTAL_PAGES * PAPERS_PER_PAGE
+        assert len(saved_pdfs) == expected, (
+            f"Expected {expected} PDFs but found {len(saved_pdfs)}: "
+            f"{[p.name for p in saved_pdfs]}"
+        )
+
+    def test_links_outside_base_path_not_queued(self, tmp_path):
+        """Links whose paths do not start with the publications base path must
+        not be added to the pagination queue."""
+        html = (
+            b"<html><body>"
+            b'<a href="https://lasp.colorado.edu/missions/">Missions</a>'
+            b'<a href="https://external.example.com/paper.html">External</a>'
+            b'<a href="https://lasp.colorado.edu/our-expertise/science/'
+            b'scientific-publications/paper1.pdf">PDF</a>'
+            b"</body></html>"
+        )
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            if url.lower().endswith(".pdf"):
+                resp.status_code = 200
+                resp.headers = {"Content-Type": "application/pdf"}
+                resp.iter_content = MagicMock(return_value=iter([b"%PDF"]))
+                return resp
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "text/html"}
+            resp.text = html.decode()
+            resp.content = html
+            return resp
+
+        builder = _make_builder(tmp_path)
+        builder.session.get = MagicMock(side_effect=fake_get)
+
+        with patch("time.sleep"):
+            pages_visited = builder.scrape_paginated(PUB_BASE + "/")
+
+        # Only the start URL itself should be a listing page
+        assert pages_visited == 1
+
+        visited = builder.visited_urls
+        assert not any("missions" in u for u in visited), (
+            "Off-path /missions/ URL must not be visited"
+        )
+        assert not any(urlparse(u).netloc == "external.example.com" for u in visited), (
+            "External domain URL must not be visited"
+        )
+
+    def test_already_visited_pages_are_skipped(self, tmp_path):
+        """A page already in visited_urls must not be re-fetched."""
+        builder = _make_builder(tmp_path)
+        builder.session = _pub_session_mock(total_pages=3, sequential=False)
+
+        # Pre-mark page 2 as visited
+        page2 = builder._normalize_url(f"{PUB_BASE}/page/2/")
+        builder.visited_urls.add(page2)
+
+        with patch("time.sleep"):
+            pages_visited = builder.scrape_paginated(PUB_BASE + "/")
+
+        # Page 2 was skipped; pages 1 and 3 were visited
+        assert pages_visited == 2
+        assert page2 in builder.visited_urls  # still present (pre-existing)
+
+    def test_returns_pages_visited_count(self, tmp_path):
+        """Return value must equal the exact number of listing pages visited."""
+        TOTAL_PAGES = 6
+        builder = _make_builder(tmp_path)
+        builder.session = _pub_session_mock(TOTAL_PAGES, sequential=True)
+
+        with patch("time.sleep"):
+            result = builder.scrape_paginated(PUB_BASE + "/")
+
+        assert result == TOTAL_PAGES
+
+    def test_http_error_on_page_does_not_stop_crawl(self, tmp_path):
+        """A network error on one page must not prevent subsequent pages
+        from being visited."""
+        import re
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            parsed_path = urlparse(url).path
+
+            # Page 2 always fails
+            if re.search(r"/page/2/?$", parsed_path):
+                resp.raise_for_status.side_effect = requests.exceptions.HTTPError(
+                    "503"
+                )
+                return resp
+
+            if PUB_BASE_PATH in parsed_path:
+                m = re.search(r"/page/(\d+)/?$", parsed_path)
+                page_num = int(m.group(1)) if m else 1
+                # Numbered pagination: all page links visible on index
+                html = _html_page(page_num, 4, 2, sequential=False)
+                resp.status_code = 200
+                resp.headers = {"Content-Type": "text/html"}
+                resp.text = html.decode()
+                resp.content = html
+                return resp
+
+            resp.status_code = 404
+            resp.raise_for_status.side_effect = requests.exceptions.HTTPError("404")
+            return resp
+
+        builder = _make_builder(tmp_path)
+        builder.session.get = MagicMock(side_effect=fake_get)
+
+        with patch("time.sleep"):
+            pages_visited = builder.scrape_paginated(PUB_BASE + "/")
+
+        # Pages 1, 3, and 4 are successfully visited; page 2 failed but didn't abort
+        assert pages_visited == 3
+        assert builder._normalize_url(f"{PUB_BASE}/page/3/") in builder.visited_urls
+        assert builder._normalize_url(f"{PUB_BASE}/page/4/") in builder.visited_urls
+
