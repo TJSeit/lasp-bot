@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from lasp_mcp import _is_mcp_enabled, run_in_background
 from rag import answer_query, build_rag_chain
 
 DISCORD_TOKEN: str | None = os.getenv("DISCORD_TOKEN")
@@ -50,6 +51,8 @@ bot = commands.Bot(command_prefix=DISCORD_COMMAND_PREFIX, intents=intents)
 async def on_ready() -> None:
     """Load the FAISS index and initialise the Ollama client on login."""
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    if _is_mcp_enabled():
+        run_in_background()
     try:
         retriever, llm_client = await asyncio.to_thread(build_rag_chain)
         _rag_state["retriever"] = retriever

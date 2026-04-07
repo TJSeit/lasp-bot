@@ -35,6 +35,13 @@ A retrieval-augmented generation (RAG) chatbot that answers questions about the
 │      ├─ Embed question (sentence-transformers, CPU)          │
 │      ├─ Retrieve top-K chunks from FAISS                     │
 │      └─ Call local Ollama server (llama3, mistral, etc.)     │
+│                                                              │
+│  app/lasp_mcp.py  MCP server (co-located, port 8001)        │
+│    Starts automatically alongside FastAPI or Discord bot     │
+│      ├─ LISIRD solar irradiance tools                        │
+│      ├─ MMS SDC magnetospheric data tools                    │
+│      ├─ AIM CIPS mesospheric cloud tools                     │
+│      └─ HAPI heliophysics time-series tool                   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -156,11 +163,16 @@ curl -X POST http://localhost:8000/query \
 ```bash
 cd app
 docker build -t lasp-bot:latest .
-docker run -p 8000:8000 \
+docker run -p 8000:8000 -p 8001:8001 \
   -v /path/to/lasp_faiss_index:/app/lasp_faiss_index \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  -e MCP_HOST=0.0.0.0 \
   lasp-bot:latest
 ```
+
+The MCP server starts automatically on port **8001** alongside the FastAPI app.
+Set `MCP_HOST=0.0.0.0` so that MCP clients outside the container can reach it.
+To disable the MCP server, pass `-e MCP_ENABLED=false`.
 
 ### 6 — Run the Discord bot
 
@@ -178,6 +190,9 @@ DISCORD_TOKEN=your_discord_bot_token_here
 cd app
 python discord_bot.py
 ```
+
+The MCP server starts automatically on port **8001** alongside the Discord bot.
+To disable the MCP server, set `MCP_ENABLED=false` in your `.env` file.
 
 Once online, use `!ask` (or `!lasp`) in any channel the bot can see:
 
@@ -237,14 +252,26 @@ observations, and standardised heliophysics time-series.
 
 ### Running the MCP server
 
+The MCP server starts **automatically** whenever the FastAPI app or the Discord
+bot starts.  By default it listens on `http://127.0.0.1:8001/mcp` using the
+streamable-HTTP transport and is ready for any MCP-compatible client (e.g.
+Claude Desktop, MCP Inspector) to connect.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_ENABLED` | `true` | Set to `false` to prevent the MCP server from starting alongside the chatbot |
+| `MCP_HOST` | `127.0.0.1` | Host to bind the MCP server to. Use `0.0.0.0` when running in Docker to expose it outside the container. |
+| `MCP_PORT` | `8001` | Port for the MCP server |
+
+To run the MCP server as a standalone stdio server (for direct use with a local
+MCP client), disable the embedded server and run it manually:
+
 ```bash
+MCP_ENABLED=false python discord_bot.py   # or: uvicorn main:app …
+# then in a separate terminal:
 cd app
-pip install -r requirements.txt
 python lasp_mcp.py
 ```
-
-The server uses the MCP stdio transport and can be connected to any
-MCP-compatible client (e.g. Claude Desktop, MCP Inspector).
 
 ---
 

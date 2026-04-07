@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from lasp_mcp import _is_mcp_enabled, run_in_background
 from rag import answer_query, build_rag_chain
 
 _state: dict = {}
@@ -27,6 +28,8 @@ async def lifespan(app: FastAPI):
     retriever, llm_client = build_rag_chain()
     _state["retriever"] = retriever
     _state["llm_client"] = llm_client
+    if _is_mcp_enabled():
+        run_in_background()
     yield
     _state.clear()
 

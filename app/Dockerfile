@@ -13,9 +13,13 @@ RUN pip install --upgrade pip \
  && pip install -r requirements.txt
 
 # Copy application source
-COPY main.py rag.py ./
+COPY main.py rag.py lasp_mcp.py ./
 
+# Port 8000: FastAPI REST API
+# Port 8001: MCP server (streamable-HTTP transport, started automatically)
+# Set MCP_HOST=0.0.0.0 at runtime to expose the MCP server outside the container.
 EXPOSE 8000
+EXPOSE 8001
 
 # One Uvicorn worker is sufficient for local hosting; scale via replicas as needed.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
